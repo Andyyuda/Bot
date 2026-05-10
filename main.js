@@ -140,7 +140,7 @@ async function start() {
       keys: makeCacheableSignalKeyStore(state.keys, baileysLogger)
     },
     printQRInTerminal: false,
-    browser: Browsers.macOS('Safari'),
+    browser: Browsers('Chrome'),
     syncFullHistory: false,
     markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false
