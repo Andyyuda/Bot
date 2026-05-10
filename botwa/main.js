@@ -412,7 +412,9 @@ async function start() {
       if (isNull || hasVO || hasMed) {
         console.log(chalk.magenta(
           `[MSG-SCAN] type=${type} fromMe=${m.key.fromMe} null=${isNull} idx=${messages.indexOf(m)}/${messages.length}\n` +
-          `           jid=${m.key.remoteJid} keys=${keys.join(', ') || '(none)'}`
+          `           jid=${m.key.remoteJid} keys=${keys.join(', ') || '(none)'}\n` +
+          `           stubType=${m.messageStubType} stubParams=${JSON.stringify(m.messageStubParameters)}\n` +
+          `           fullMsg=${JSON.stringify({key:m.key,messageStubType:m.messageStubType,messageStubParameters:m.messageStubParameters})}`
         ));
       }
     }
