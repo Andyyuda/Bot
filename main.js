@@ -49,56 +49,50 @@ async function start() {
   if (!state.creds.registered) {
     if (tg.isConfigured) {
       // ─── LOGIN VIA TELEGRAM ───────────────────────────────────────
-      console.log(chalk.cyan('📲 Bot belum terdaftar. Mengirim pilihan login ke Telegram...'));
+      console.log(chalk.cyan('📲 Bot belum terdaftar. Mengirim permintaan nomor ke Telegram...'));
       await tg.sendMessage(
         '🤖 <b>BotWA siap login!</b>\n\n' +
-        'Pilih metode:\n' +
-        '<b>1</b> — Scan QR Code\n' +
-        '<b>2</b> — Pairing Code (nomor HP)\n\n' +
-        'Balas dengan angka <b>1</b> atau <b>2</b>'
+        '📱 Kirim nomor HP untuk <b>Pairing Code</b>:\n' +
+        '<code>628xxxxxxxxxx</code> (tanpa + atau spasi)\n\n' +
+        '💡 Atau ketik <b>qr</b> jika ingin scan QR Code.'
       );
 
-      const pilihan = await tg.waitReply(120000);
+      const input = await tg.waitReply(120000);
+      const inputBersih = (input || '').trim().toLowerCase();
 
-      if (pilihan === '1') {
+      if (inputBersih === 'qr') {
         modeLogin = 'qr';
         await tg.sendMessage('✅ Mode QR dipilih. QR akan dikirim sebentar...');
-      } else if (pilihan === '2') {
-        modeLogin = 'pairing';
-        await tg.sendMessage('📱 Masukkan nomor HP:\n<code>628xxxxxxxxxx</code>\n(tanpa + atau spasi)');
-        const input = await tg.waitReply(120000);
+      } else {
         nomorTarget = (input || '').replace(/[^0-9]/g, '');
         if (!nomorTarget || nomorTarget.length < 10) {
           await tg.sendMessage('❌ Nomor tidak valid. Restart bot dan coba lagi.');
           return;
         }
+        modeLogin = 'pairing';
         await tg.sendMessage(`⏳ Nomor diterima: <code>${nomorTarget}</code>\nMeminta pairing code...`);
-      } else {
-        await tg.sendMessage('❌ Input tidak dikenali. Restart bot dan coba lagi.');
-        return;
       }
       // ─────────────────────────────────────────────────────────────
     } else {
       // ─── LOGIN VIA TERMINAL ───────────────────────────────────────
       console.log(chalk.bgCyan.black('\n╔══════════════════════════════════╗'));
-      console.log(chalk.bgCyan.black('   🤖  BOTWA — PILIH METODE LOGIN   '));
+      console.log(chalk.bgCyan.black('   🤖  BOTWA — LOGIN WHATSAPP BOT   '));
       console.log(chalk.bgCyan.black('╚══════════════════════════════════╝\n'));
-      console.log(chalk.white('  [1] Scan QR Code  ') + chalk.gray('(scan dari terminal)'));
-      console.log(chalk.white('  [2] Pairing Code  ') + chalk.gray('(masukkan kode di WA → Linked Devices)\n'));
+      console.log(chalk.gray('  Masukkan nomor HP untuk Pairing Code.'));
+      console.log(chalk.gray('  Ketik "qr" jika ingin scan QR Code.\n'));
 
-      const pilihan = await tanyaInput(chalk.cyan('Pilih metode [1/2]: '));
+      const input = await tanyaInput(chalk.cyan('📱 Nomor HP (628xxx) atau "qr": '));
 
-      if (pilihan === '1' || pilihan.toLowerCase() === 'q') {
+      if (input.trim().toLowerCase() === 'qr') {
         modeLogin = 'qr';
         console.log(chalk.green('\n✅ Mode QR dipilih. QR akan muncul di bawah...\n'));
       } else {
-        modeLogin = 'pairing';
-        nomorTarget = (await tanyaInput(chalk.cyan('📱 Masukkan nomor HP (contoh: 628xxxxxxxxxx): ')))
-          .replace(/[^0-9]/g, '');
-        if (!nomorTarget) {
-          console.log(chalk.red('❌ Nomor tidak boleh kosong. Coba lagi.'));
+        nomorTarget = input.replace(/[^0-9]/g, '');
+        if (!nomorTarget || nomorTarget.length < 10) {
+          console.log(chalk.red('❌ Nomor tidak valid. Coba lagi.'));
           return start();
         }
+        modeLogin = 'pairing';
       }
       // ─────────────────────────────────────────────────────────────
     }
