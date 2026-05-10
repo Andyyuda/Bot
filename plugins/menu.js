@@ -1,11 +1,11 @@
 /**
- * .menu — Tampilkan menu bot dengan logo AndyStore + poll interaktif
+ * .menu — Logo AndyStore + menu teks + proto interactive buttons
  */
 
 const fs   = require('fs');
 const path = require('path');
 const setting = require('../setting');
-const { sendPoll } = require('../lib/button');
+const { sendInteractive, sendList, quickReply, singleSelect } = require('../lib/button');
 
 const LOGO_PATH = path.join(__dirname, '../assets/logo.png');
 
@@ -19,7 +19,7 @@ function getPrefix() {
 }
 
 module.exports = {
-  name: '.menu',
+  name   : '.menu',
   command: ['.menu', '.help', '.start'],
 
   async execute(conn, sender, args, msg) {
@@ -40,77 +40,43 @@ module.exports = {
 │ ${p}myid       → Lihat ID kamu
 │ ${p}regowner   → Daftar owner (PIN)
 │ ${p}addowner   → Tambah owner baru
-│ ${p}delowner   → Hapus owner
-│ ${p}owner      → Daftar owner aktif
 │ ${p}setprefix  → Ganti prefix bot
 └─────────────────────
 
 ⚙️ *[ MANAJEMEN BOT ]*
 ┌─────────────────────
 │ ${p}restart    → Restart bot
-│ ${p}delsampah  → Bersihkan file sesi
 │ ${p}addplugin  → Upload plugin baru
 │ ${p}delplugin  → Hapus plugin
-│ ${p}getplugin  → Download plugin
-│ $ <cmd>     → Jalankan shell (owner)
+│ $ <cmd>        → Jalankan shell
 └─────────────────────
 
 👥 *[ GRUP TOOLS ]*
 ┌─────────────────────
-│ ${p}add        → Tambah member
-│ ${p}kick       → Keluarkan member
-│ ${p}mute       → Bisukan member
-│ ${p}unmute     → Buka bisuan member
-│ ${p}welcome    → Pesan sambutan masuk
-│ ${p}leave      → Pesan sambutan keluar
-└─────────────────────
-
-🛒 *[ TOKO & PRODUK ]*
-┌─────────────────────
-│ ${p}addproduk  → Tambah produk (sesi)
-│ ${p}dompul     → Cek dompet/saldo
-│ ${p}enc        → Enkripsi plugin
-│ ${p}encall     → Enkripsi semua plugin
-└─────────────────────
-
-🖥️ *[ SERVER VPS ]*
-┌─────────────────────
-│ ${p}installsc  → Kirim script install
-│ ${p}regisip    → Registrasi IP VPS
-│ ${p}perpanjangip → Perpanjang IP
-│ ${p}bersihkanip  → Hapus IP expired
+│ ${p}add   ${p}kick   ${p}mute   ${p}unmute
+│ ${p}welcome   ${p}leave
 └─────────────────────
 
 🔐 *[ AKUN VPN ]*
 ┌─────────────────────
-│ ${p}buatssh    → Buat akun SSH (sesi)
-│ ${p}trialssh   → SSH trial 60 menit
-│ ${p}addtr      → Buat akun Trojan
-│ ${p}trialtr    → Trojan trial 60 menit
-│ ${p}addvl      → Buat akun VLESS
-│ ${p}trialvl    → VLESS trial 60 menit
-│ ${p}addvm      → Buat akun VMess
-│ ${p}trialvm    → VMess trial 60 menit
+│ ${p}buatssh  ${p}trialssh  ${p}addtr  ${p}trialtr
+│ ${p}addvl    ${p}trialvl   ${p}addvm  ${p}trialvm
 └─────────────────────
 
 🎵 *[ HIBURAN ]*
 ┌─────────────────────
-│ ${p}play       → Putar lagu YouTube
-│ ${p}stop       → Stop download audio
-│ ${p}ping       → Tes kecepatan bot
-│ ${p}jadibot    → Clone bot WhatsApp
+│ ${p}play  ${p}stop  ${p}ping  ${p}jadibot
 └─────────────────────
 
 ━━━━━━━━━━━━━━━━━━━━━━━
-✨ *AndyStore Bot* — Powered by Baileys
-📞 Owner: @andyyuda28
-━━━━━━━━━━━━━━━━━━━━━━━`;
+✨ *AndyStore Bot* — Powered by dgxeon-soket v7
+📞 Owner: @andyyuda28`;
 
-    // ── 1. Kirim logo + full menu sebagai caption ─────────────────────────────
+    // ── 1. Kirim logo + menu teks ─────────────────────────────────────────────
     if (fs.existsSync(LOGO_PATH)) {
       const logoBuffer = fs.readFileSync(LOGO_PATH);
       await conn.sendMessage(sender, {
-        image: logoBuffer,
+        image  : logoBuffer,
         caption: menuText,
         mimetype: 'image/png'
       }, { quoted: msg });
@@ -118,17 +84,76 @@ module.exports = {
       await conn.sendMessage(sender, { text: menuText }, { quoted: msg });
     }
 
-    // ── 2. Kirim poll interaktif (PASTI muncul di semua WA) ───────────────────
-    await sendPoll(conn, sender, {
-      question: '⚡ Pilih aksi cepat:',
-      options: [
-        { label: '🏓 Ping Bot',       command: `${p}ping` },
-        { label: '🎵 Putar Musik',    command: `${p}play` },
-        { label: '👤 ID Saya',        command: `${p}myid` },
-        { label: '🖥️ Buat SSH',      command: `${p}buatssh` },
-        { label: '🔄 Restart Bot',    command: `${p}restart` },
-        { label: '📜 Menu Lengkap',   command: `${p}menu` },
-      ]
-    });
+    // ── 2. Kirim proto interactive button (single_select dropdown) ────────────
+    try {
+      await sendInteractive(conn, sender, {
+        title : '🤖 AndyStore Bot',
+        body  : `⚡ *Aksi Cepat* — prefix: \`${p || 'none'}\`\nPilih perintah:`,
+        footer: 'AndyStore Bot • @andyyuda28',
+        buttons: [
+          singleSelect('📋 Pilih Menu', [
+            {
+              title: '🔥 Populer',
+              rows : [
+                { title: '🏓 Ping Bot',     description: 'Tes kecepatan bot',          id: `${p}ping` },
+                { title: '🎵 Putar Musik',  description: 'YouTube audio',               id: `${p}play` },
+                { title: '👤 ID Saya',      description: 'Lihat ID / nomor kamu',       id: `${p}myid` },
+                { title: '📜 Menu Lengkap', description: 'Tampilkan menu lagi',          id: `${p}menu` },
+              ]
+            },
+            {
+              title: '👑 Owner & Bot',
+              rows : [
+                { title: '⚙️ Ganti Prefix', description: 'Ubah prefix perintah',       id: `${p}setprefix` },
+                { title: '🔑 Daftar Owner', description: 'Daftar jadi owner via PIN',   id: `${p}regowner` },
+                { title: '🔄 Restart Bot',  description: 'Restart ulang bot',           id: `${p}restart` },
+              ]
+            },
+            {
+              title: '🔐 Akun VPN',
+              rows : [
+                { title: '🔐 Buat SSH',    description: 'Buat akun SSH baru',          id: `${p}buatssh` },
+                { title: '⚡ Trial SSH',   description: 'SSH trial 60 menit',           id: `${p}trialssh` },
+                { title: '🌀 Buat Trojan', description: 'Buat akun Trojan',             id: `${p}addtr` },
+                { title: '💠 Buat VLESS',  description: 'Buat akun VLESS',             id: `${p}addvl` },
+              ]
+            },
+            {
+              title: '👥 Grup',
+              rows : [
+                { title: '➕ Add Member',  description: 'Tambah member ke grup',       id: `${p}add` },
+                { title: '🚫 Kick Member', description: 'Keluarkan member',             id: `${p}kick` },
+                { title: '🔇 Mute Member', description: 'Bisukan member di grup',       id: `${p}mute` },
+              ]
+            }
+          ]),
+          quickReply('🏓 Ping', `${p}ping`),
+          quickReply('🎵 Play', `${p}play`),
+        ]
+      }, msg);
+    } catch (e) {
+      console.error('[menu] Proto button error:', e.message);
+      // Fallback ke list message
+      try {
+        await sendList(conn, sender, {
+          body    : `⚡ *Aksi Cepat* — prefix: \`${p || 'none'}\``,
+          footer  : 'AndyStore Bot',
+          btnLabel: '📋 Pilih Perintah',
+          sections: [
+            { title: '🔥 Populer', rows: [
+              { title: '🏓 Ping', rowId: `${p}ping`, description: 'Tes kecepatan' },
+              { title: '🎵 Play', rowId: `${p}play`, description: 'Putar musik' },
+              { title: '👤 ID',   rowId: `${p}myid`, description: 'Lihat ID kamu' },
+            ]},
+            { title: '⚙️ Bot', rows: [
+              { title: '🔄 Restart',      rowId: `${p}restart` },
+              { title: '⚙️ Ganti Prefix', rowId: `${p}setprefix` },
+            ]}
+          ]
+        }, msg);
+      } catch (e2) {
+        console.error('[menu] List fallback error:', e2.message);
+      }
+    }
   }
 };
