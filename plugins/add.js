@@ -30,15 +30,36 @@ module.exports = {
       return conn.sendMessage(sender, { text: '❌ Bot harus menjadi *admin grup* untuk menambahkan anggota.' }, { quoted: msg });
     }
 
-    const nomor = args[0]?.replace(/[^0-9]/g, '');
-    if (!nomor) {
-      return conn.sendMessage(sender, { text: '⚠️ Contoh: .add 6281234567890' }, { quoted: msg });
+    // Cari target: dari reply pesan, dari tag @mention, atau dari nomor di argumen
+    let targets = [];
+
+    const quotedParticipant = msg.message?.extendedTextMessage?.contextInfo?.participant;
+    const mentionedJid = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;
+    const nomorArg = args[0]?.replace(/[^0-9]/g, '');
+
+    if (quotedParticipant) {
+      // Cara 1: Reply pesan seseorang
+      const { normalizeJid } = require('../lib/helper');
+      targets = [normalizeJid(quotedParticipant)];
+    } else if (mentionedJid && mentionedJid.length > 0) {
+      // Cara 2: Tag @mention
+      targets = mentionedJid;
+    } else if (nomorArg) {
+      // Cara 3: Ketik nomor langsung
+      targets = [nomorArg + '@s.whatsapp.net'];
+    } else {
+      return conn.sendMessage(sender, {
+        text: '⚠️ Cara pakai:\n• Reply pesan seseorang + ketik .add\n• Tag: .add @628xxxx\n• Nomor: .add 628xxxx'
+      }, { quoted: msg });
     }
 
-    const jid = nomor + '@s.whatsapp.net';
     try {
-      await conn.groupParticipantsUpdate(groupId, [jid], 'add');
-      await conn.sendMessage(sender, { text: `✅ Berhasil menambahkan @${nomor}`, mentions: [jid] }, { quoted: msg });
+      await conn.groupParticipantsUpdate(groupId, targets, 'add');
+      const nomorList = targets.map(j => j.split(':')[0].split('@')[0]).join(', ');
+      await conn.sendMessage(sender, {
+        text: `✅ Berhasil menambahkan: ${nomorList}`,
+        mentions: targets
+      }, { quoted: msg });
     } catch (e) {
       await conn.sendMessage(sender, { text: '❌ Gagal menambahkan. Mungkin pengguna menolak undangan grup.' }, { quoted: msg });
     }

@@ -32,14 +32,31 @@ module.exports = {
       return conn.sendMessage(sender, { text: '❌ Bot harus menjadi *admin grup* untuk kick anggota.' }, { quoted: msg });
     }
 
-    const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;
-    if (!mentioned || mentioned.length === 0) {
-      return conn.sendMessage(sender, { text: '⚠️ Tag seseorang untuk dikeluarkan. Contoh: .kick @628xxxx' }, { quoted: msg });
+    // Cari target: dari reply pesan, dari tag @mention, atau dari nomor di argumen
+    let targets = [];
+
+    const quotedParticipant = msg.message?.extendedTextMessage?.contextInfo?.participant;
+    const mentionedJid = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;
+    const nomorArg = args[0]?.replace(/[^0-9]/g, '');
+
+    if (quotedParticipant) {
+      // Cara 1: Reply pesan seseorang
+      targets = [quotedParticipant];
+    } else if (mentionedJid && mentionedJid.length > 0) {
+      // Cara 2: Tag @mention
+      targets = mentionedJid;
+    } else if (nomorArg) {
+      // Cara 3: Ketik nomor langsung
+      targets = [nomorArg + '@s.whatsapp.net'];
+    } else {
+      return conn.sendMessage(sender, {
+        text: '⚠️ Cara pakai:\n• Reply pesan seseorang + ketik .kick\n• Tag: .kick @628xxxx\n• Nomor: .kick 628xxxx'
+      }, { quoted: msg });
     }
 
     try {
-      await conn.groupParticipantsUpdate(groupId, mentioned, 'remove');
-      await conn.sendMessage(sender, { text: `✅ Berhasil mengeluarkan anggota.` }, { quoted: msg });
+      await conn.groupParticipantsUpdate(groupId, targets, 'remove');
+      await conn.sendMessage(sender, { text: `✅ Berhasil mengeluarkan ${targets.length} anggota.` }, { quoted: msg });
     } catch (e) {
       await conn.sendMessage(sender, { text: `❌ Gagal mengeluarkan anggota: ${e.message}` }, { quoted: msg });
     }
