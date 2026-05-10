@@ -9,7 +9,7 @@
  * Ganti 'gantipin' dengan PIN buatan kamu sendiri
  */
 module.exports = {
-  owner: ['248335797633091'],
+  owner: ['248335797633091', '268530129858702'],
   ownerPin: 'gantipin123',
   prefix: '.',   // prefix default (bisa diubah via .setprefix)
 };
