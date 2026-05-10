@@ -398,6 +398,16 @@ async function start() {
       }
     }
 
+    // 🔍 DEBUG: log semua pesan masuk beserta tipe-nya
+    {
+      const keys = Object.keys(msg.message || {});
+      const hasMedia = keys.some(k => ['imageMessage','videoMessage','audioMessage','documentMessage'].includes(k));
+      const hasVO    = keys.some(k => k.toLowerCase().includes('viewonce'));
+      if (hasMedia || hasVO) {
+        console.log(chalk.magenta(`[MSG] fromMe=${msg.key.fromMe} jid=${msg.key.remoteJid} keys=${keys.join(',')}`));
+      }
+    }
+
     if (msg.key.fromMe) return;
 
     const remoteJid = msg.key.remoteJid;
