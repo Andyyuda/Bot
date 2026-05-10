@@ -4,7 +4,8 @@ const {
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   Browsers,
-  DisconnectReason
+  DisconnectReason,
+  decryptPollVote
 } = require('@whiskeysockets/baileys');
 const fs = require('fs');
 const path = require('path');
@@ -259,6 +260,90 @@ async function start() {
         } catch (err) {
           console.error('❌ Plugin group error:', err);
         }
+      }
+    }
+  });
+
+  // 🔧 Helper: jalankan command dari poll response
+  async function runCommand(sock, jid, senderJid, commandText, quotedMsg) {
+    const prefix = getPrefix();
+    const commandLow = commandText.trim().toLowerCase();
+
+    let plugin = plugins.find(p =>
+      p.name === commandLow ||
+      (Array.isArray(p.command) && p.command.includes(commandLow))
+    );
+
+    if (!plugin) {
+      let base = null;
+      if (prefix !== '' && commandText.startsWith(prefix)) {
+        base = commandText.substring(prefix.length).toLowerCase();
+      } else if (prefix === '') {
+        base = commandLow;
+      }
+      if (base !== null) {
+        const dotCmd = '.' + base;
+        plugin = plugins.find(p =>
+          p.name === dotCmd ||
+          (Array.isArray(p.command) && p.command.includes(dotCmd))
+        );
+      }
+    }
+
+    if (plugin && typeof plugin.execute === 'function') {
+      await plugin.execute(sock, jid, [], quotedMsg, commandText);
+    }
+  }
+
+  // 📊 Handler poll vote — eksekusi command saat user pilih opsi poll
+  sock.ev.on('messages.upsert', async ({ messages }) => {
+    for (const msg of messages) {
+      if (!msg?.message?.pollUpdateMessage) continue;
+      if (msg.key.remoteJid === 'status@broadcast') continue;
+
+      const pollUpdate = msg.message.pollUpdateMessage;
+      const pollId     = pollUpdate.pollCreationMessageKey?.id;
+      const poll       = global.pollRegistry?.[pollId];
+      if (!poll) continue;
+
+      const jid       = msg.key.remoteJid;
+      const senderJid = msg.key.participant || jid;
+
+      try {
+        // Coba decrypt vote dengan creds bot
+        const creds = state.creds;
+        const privKey = creds.signedIdentityKey?.private
+                     || creds.pairingKey
+                     || creds.identityKeyPair?.private;
+
+        if (privKey && pollUpdate.vote) {
+          const decrypted = await decryptPollVote(pollUpdate.vote, {
+            msgKey   : pollUpdate.pollCreationMessageKey,
+            privateKey: typeof privKey === 'string'
+              ? Buffer.from(privKey, 'base64')
+              : Buffer.from(privKey)
+          });
+          const selected = decrypted?.selectedOptions ?? [];
+          for (const opt of poll.options) {
+            for (const sel of selected) {
+              const selHex  = Buffer.from(sel).toString('hex');
+              const optHash = require('crypto').createHash('sha256')
+                                .update(opt.label, 'utf8').digest('hex');
+              if (selHex === optHash) {
+                console.log(chalk.green(`[POLL] ${senderJid} pilih: ${opt.label} → ${opt.command}`));
+                await runCommand(sock, jid, senderJid, opt.command, msg);
+                break;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        // Fallback: balas dengan teks perintah
+        const optList = poll.options.map((o, i) => `${i + 1}. ${o.label} → ${o.command}`).join('\n');
+        console.log(chalk.yellow(`[POLL] decrypt gagal, fallback teks`));
+        await sock.sendMessage(jid, {
+          text: `Ketik perintah langsung:\n${optList}`
+        }, { quoted: msg });
       }
     }
   });
