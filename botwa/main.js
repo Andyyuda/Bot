@@ -150,6 +150,10 @@ async function start() {
     child: function() { return this; }
   };
 
+  // Cache pesan masuk agar retry request dari WA bisa dipenuhi
+  const msgStore = new Map();
+  const MAX_STORE = 500;
+
   const sock = makeWASocket({
     version,
     logger: baileysLogger,
@@ -161,7 +165,15 @@ async function start() {
     browser: Browsers('Chrome'),
     syncFullHistory: false,
     markOnlineOnConnect: false,
-    generateHighQualityLinkPreview: false
+    generateHighQualityLinkPreview: false,
+    retryRequestDelayMs: 250,
+    maxMsgRetryCount: 5,
+    // Wajib agar "could not send message again" tidak muncul
+    getMessage: async (key) => {
+      const id = key.id;
+      if (msgStore.has(id)) return msgStore.get(id);
+      return { conversation: '' };
+    }
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -370,6 +382,16 @@ async function start() {
   sock.ev.on('messages.upsert', async ({ messages }) => {
     const msg = messages[0];
     if (!msg?.message || msg.key.remoteJid === 'status@broadcast') return;
+
+    // Simpan ke msgStore untuk retry WA
+    if (msg.key.id && msg.message) {
+      msgStore.set(msg.key.id, msg.message);
+      if (msgStore.size > MAX_STORE) {
+        const oldest = msgStore.keys().next().value;
+        msgStore.delete(oldest);
+      }
+    }
+
     if (msg.key.fromMe) return;
 
     const remoteJid = msg.key.remoteJid;
