@@ -385,8 +385,40 @@ async function start() {
   });
 
   // 📩 Handler pesan masuk
-  sock.ev.on('messages.upsert', async ({ messages }) => {
+  // 👁️ messages.update — tangkap view once yang datang via update event
+  sock.ev.on('messages.update', async (updates) => {
+    for (const update of updates) {
+      const jid = update.key?.remoteJid;
+      if (!jid || jid === 'status@broadcast') return;
+      console.log(chalk.magenta(`[UPDATE] jid=${jid} id=${update.key?.id} update_keys=${Object.keys(update.update || {}).join(',')}`));
+      for (const plugin of plugins) {
+        if (typeof plugin.handleUpdate === 'function') {
+          try { await plugin.handleUpdate(sock, update); } catch (e) {
+            console.error(`[handleUpdate] ${plugin.name}:`, e.message);
+          }
+        }
+      }
+    }
+  });
+
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    // 🔍 DEBUG: scan SEMUA pesan di batch (bukan hanya [0])
+    for (const m of messages) {
+      if (!m || m.key.remoteJid === 'status@broadcast') continue;
+      const keys = Object.keys(m.message || {});
+      const isNull = !m.message;
+      const hasVO  = keys.some(k => k.toLowerCase().includes('viewonce'));
+      const hasMed = keys.some(k => ['imageMessage','videoMessage','audioMessage','documentMessage'].includes(k));
+      if (isNull || hasVO || hasMed) {
+        console.log(chalk.magenta(
+          `[MSG-SCAN] type=${type} fromMe=${m.key.fromMe} null=${isNull} idx=${messages.indexOf(m)}/${messages.length}\n` +
+          `           jid=${m.key.remoteJid} keys=${keys.join(', ') || '(none)'}`
+        ));
+      }
+    }
+
     const msg = messages[0];
+
     if (!msg?.message || msg.key.remoteJid === 'status@broadcast') return;
 
     // Simpan ke msgStore untuk retry WA
@@ -395,16 +427,6 @@ async function start() {
       if (msgStore.size > MAX_STORE) {
         const oldest = msgStore.keys().next().value;
         msgStore.delete(oldest);
-      }
-    }
-
-    // 🔍 DEBUG: log semua pesan masuk beserta tipe-nya
-    {
-      const keys = Object.keys(msg.message || {});
-      const hasMedia = keys.some(k => ['imageMessage','videoMessage','audioMessage','documentMessage'].includes(k));
-      const hasVO    = keys.some(k => k.toLowerCase().includes('viewonce'));
-      if (hasMedia || hasVO) {
-        console.log(chalk.magenta(`[MSG] fromMe=${msg.key.fromMe} jid=${msg.key.remoteJid} keys=${keys.join(',')}`));
       }
     }
 
