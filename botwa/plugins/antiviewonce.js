@@ -1,8 +1,11 @@
 /**
- * .antiviewonce — Buka pesan sekali lihat agar bisa dilihat terus
+ * .antiviewonce — Buka pesan sekali lihat
+ * Deteksi otomatis, quote pesan asli + kirim debug info di chat.
+ * Kalau download berhasil → kirim medianya sekalian.
+ *
  * Perintah:
- *   .antiviewonce on   — Aktifkan (owner, per chat/grup)
- *   .antiviewonce off  — Matikan
+ *   .antiviewonce on   — Aktifkan (owner)
+ *   .antiviewonce off  — Matikan (owner)
  *   .antiviewonce      — Lihat status
  */
 
@@ -23,109 +26,133 @@ function saveDB(data) {
 }
 
 /**
- * Cari view once message dari dalam msg.message,
- * mendukung semua format WA: viewOnceMessage, viewOnceMessageV2,
- * viewOnceMessageV2Extension, dan wrapped di dalam ephemeralMessage.
- * Returns { innerMsg, type } atau null.
+ * Rekursif cari view once di dalam objek message.
+ * Return { found: true, path: string, innerMsg, mediaType } atau { found: false }
  */
-function extractViewOnce(rawMsg) {
-  // Daftar semua wrapper view once yang mungkin
-  const WRAPPERS = [
-    'viewOnceMessage',
-    'viewOnceMessageV2',
-    'viewOnceMessageV2Extension',
-  ];
+function findViewOnce(obj, currentPath = 'message') {
+  if (!obj || typeof obj !== 'object') return { found: false };
 
-  // Cari langsung di rawMsg
-  for (const wrap of WRAPPERS) {
-    const inner = rawMsg?.[wrap]?.message;
-    if (inner) {
-      const type = Object.keys(inner)[0];
-      if (type === 'imageMessage' || type === 'videoMessage') {
-        return { innerMsg: inner[type], mediaType: type === 'imageMessage' ? 'image' : 'video' };
-      }
-    }
-  }
+  const MEDIA_TYPES = ['imageMessage', 'videoMessage'];
 
-  // Cari di dalam ephemeralMessage (pesan sementara)
-  const ephemeral = rawMsg?.ephemeralMessage?.message;
-  if (ephemeral) {
-    for (const wrap of WRAPPERS) {
-      const inner = ephemeral?.[wrap]?.message;
-      if (inner) {
-        const type = Object.keys(inner)[0];
-        if (type === 'imageMessage' || type === 'videoMessage') {
-          return { innerMsg: inner[type], mediaType: type === 'imageMessage' ? 'image' : 'video' };
+  for (const key of Object.keys(obj)) {
+    const val = obj[key];
+
+    // Kalau key mengandung "viewonce" (case-insensitive)
+    if (key.toLowerCase().includes('viewonce')) {
+      // Cari imageMessage / videoMessage di dalamnya
+      const inner = val?.message || val;
+      if (inner && typeof inner === 'object') {
+        for (const mtype of MEDIA_TYPES) {
+          if (inner[mtype]) {
+            return {
+              found    : true,
+              path     : `${currentPath}.${key}`,
+              innerMsg : inner[mtype],
+              mediaType: mtype === 'imageMessage' ? 'image' : 'video',
+              mtype
+            };
+          }
         }
       }
     }
-  }
 
-  // Cek imageMessage/videoMessage langsung dengan flag viewOnce: true
-  for (const t of ['imageMessage', 'videoMessage']) {
-    if (rawMsg?.[t]?.viewOnce === true) {
-      return { innerMsg: rawMsg[t], mediaType: t === 'imageMessage' ? 'image' : 'video' };
+    // imageMessage / videoMessage dengan flag viewOnce: true langsung
+    if (MEDIA_TYPES.includes(key) && val?.viewOnce === true) {
+      return {
+        found    : true,
+        path     : `${currentPath}.${key} (viewOnce flag)`,
+        innerMsg : val,
+        mediaType: key === 'imageMessage' ? 'image' : 'video',
+        mtype    : key
+      };
+    }
+
+    // Rekursif masuk ke dalam object (maks 3 level)
+    if (val && typeof val === 'object' && currentPath.split('.').length < 4) {
+      const result = findViewOnce(val, `${currentPath}.${key}`);
+      if (result.found) return result;
     }
   }
 
-  return null;
+  return { found: false };
 }
 
 module.exports = {
   name   : '.antiviewonce',
   command: ['.antiviewonce', '.avo', '.antivo'],
 
-  // ── Handler otomatis untuk semua pesan masuk ────────────────────────────
+  // ── Handler otomatis untuk semua pesan masuk ──────────────────────────────
   async handleMessage(conn, msg) {
     const db  = loadDB();
     const jid = msg.key.remoteJid;
     if (!jid || jid === 'status@broadcast') return;
-    if (!db[jid]) return; // fitur tidak aktif di chat ini
+    if (!db[jid]) return;
 
     const rawMsg = msg.message;
     if (!rawMsg) return;
 
-    // Debug: log semua key pesan masuk untuk diagnosa
-    const keys = Object.keys(rawMsg);
-    const hasVO = keys.some(k => k.toLowerCase().includes('viewonce'));
-    if (hasVO) {
-      console.log('[antiviewonce] 👁️ View once terdeteksi! Keys:', keys.join(', '));
+    // Cari view once di seluruh struktur pesan (rekursif)
+    const result = findViewOnce(rawMsg);
+    if (!result.found) return;
+
+    const { path: msgPath, innerMsg, mediaType, mtype } = result;
+
+    console.log(`[antiviewonce] 👁️ VIEW ONCE ditemukan! Path: ${msgPath}`);
+
+    // ── Step 1: Langsung quote + kirim info debug ke chat ────────────────────
+    const debugInfo =
+      `👁️ *View Once Terdeteksi!*\n\n` +
+      `📍 Path  : \`${msgPath}\`\n` +
+      `📦 Type  : \`${mtype}\`\n` +
+      `📐 Size  : ${innerMsg.fileLength || '?'} bytes\n` +
+      `💬 Caption: ${innerMsg.caption || '(kosong)'}\n\n` +
+      `⬇️ _Mencoba download..._`;
+
+    let debugMsg;
+    try {
+      debugMsg = await conn.sendMessage(jid, { text: debugInfo }, { quoted: msg });
+    } catch (e) {
+      console.error('[antiviewonce] gagal kirim debug msg:', e.message);
     }
 
-    const found = extractViewOnce(rawMsg);
-    if (!found) return;
-
-    const { innerMsg, mediaType } = found;
-    console.log(`[antiviewonce] ⬇️ Download ${mediaType} dari ${jid}...`);
-
+    // ── Step 2: Download dan kirim ulang media ────────────────────────────────
+    let statusTeks;
     try {
       const stream = await downloadContentFromMessage(innerMsg, mediaType);
-      let buffer   = Buffer.from([]);
+      let buffer = Buffer.from([]);
       for await (const chunk of stream) {
         buffer = Buffer.concat([buffer, chunk]);
       }
 
-      if (buffer.length === 0) throw new Error('Buffer kosong setelah download');
+      if (buffer.length === 0) throw new Error('Buffer kosong');
 
-      console.log(`[antiviewonce] ✅ Download selesai (${(buffer.length / 1024).toFixed(1)} KB)`);
+      console.log(`[antiviewonce] ✅ ${mediaType} ${(buffer.length / 1024).toFixed(1)} KB`);
 
-      const caption = (innerMsg.caption ? innerMsg.caption + '\n\n' : '') +
-                      `*[👁️ Anti View Once]*\n_Pesan ini aslinya hanya bisa dilihat sekali._`;
+      const caption =
+        (innerMsg.caption ? innerMsg.caption + '\n\n' : '') +
+        `*[👁️ Anti View Once]*\n_Aslinya pesan ini hanya bisa dilihat sekali._`;
 
       if (mediaType === 'image') {
         await conn.sendMessage(jid, { image: buffer, caption }, { quoted: msg });
       } else {
         await conn.sendMessage(jid, { video: buffer, caption }, { quoted: msg });
       }
+
+      statusTeks = `✅ *Berhasil!* Media ${mediaType} sudah dikirim ulang.`;
     } catch (err) {
-      console.error('[antiviewonce] ❌ Gagal download:', err.message);
-      await conn.sendMessage(jid, {
-        text: `👁️ *Anti View Once*\n\nAda pesan sekali lihat masuk, tapi gagal membukanya.\n_Error: ${err.message}_`
-      }, { quoted: msg });
+      console.error('[antiviewonce] ❌ Download error:', err.message);
+      statusTeks = `❌ *Gagal download!*\nError: \`${err.message}\`\n\nℹ️ Info ini membantu pengembang untuk debug.`;
     }
+
+    // ── Step 3: Update debug message dengan status akhir ─────────────────────
+    try {
+      await conn.sendMessage(jid, {
+        text: `${debugInfo.replace('⬇️ _Mencoba download..._', statusTeks)}`
+      }, { quoted: msg });
+    } catch {}
   },
 
-  // ── Command handler ──────────────────────────────────────────────────────
+  // ── Command handler ────────────────────────────────────────────────────────
   async execute(conn, sender, args, msg) {
     const senderJid  = msg.key.participant || msg.key.remoteJid;
     const ownerCheck = isOwner(senderJid, setting.owner);
@@ -142,10 +169,10 @@ module.exports = {
     if (!sub) {
       const status = db[sender] ? '✅ Aktif' : '❌ Nonaktif';
       return conn.sendMessage(sender, {
-        text: `👁️ *ANTI VIEW ONCE*\n\nStatus di chat ini: ${status}\n\n` +
+        text: `👁️ *ANTI VIEW ONCE*\n\nStatus: ${status}\n\n` +
               `• _.antiviewonce on_ — Aktifkan\n` +
               `• _.antiviewonce off_ — Matikan\n\n` +
-              `_Jika aktif, foto/video sekali lihat akan otomatis dibuka dan dikirim ulang._`
+              `_Jika aktif, setiap pesan view once yang masuk akan di-quote + dibuka otomatis._`
       }, { quoted: msg });
     }
 
@@ -153,16 +180,18 @@ module.exports = {
       db[sender] = true;
       saveDB(db);
       return conn.sendMessage(sender, {
-        text: `✅ *Anti View Once diaktifkan!*\n\nSetiap pesan sekali lihat (foto/video) yang masuk akan otomatis dibuka dan dikirim ulang.`
+        text: `✅ *Anti View Once diaktifkan!*\n\n` +
+              `Setiap pesan sekali lihat yang masuk akan:\n` +
+              `1️⃣ Di-quote dengan info deteksi\n` +
+              `2️⃣ Dicoba download dan dikirim ulang\n` +
+              `3️⃣ Dilaporkan hasilnya (berhasil/gagal)`
       }, { quoted: msg });
     }
 
     if (sub === 'off') {
       delete db[sender];
       saveDB(db);
-      return conn.sendMessage(sender, {
-        text: `🔕 *Anti View Once dimatikan.*`
-      }, { quoted: msg });
+      return conn.sendMessage(sender, { text: `🔕 *Anti View Once dimatikan.*` }, { quoted: msg });
     }
 
     await conn.sendMessage(sender, {
