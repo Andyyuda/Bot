@@ -402,24 +402,26 @@ async function start() {
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    // 🔍 DEBUG: scan SEMUA pesan di batch (bukan hanya [0])
-    for (const m of messages) {
-      if (!m || m.key.remoteJid === 'status@broadcast') continue;
-      const keys = Object.keys(m.message || {});
-      const isNull = !m.message;
-      const hasVO  = keys.some(k => k.toLowerCase().includes('viewonce'));
-      const hasMed = keys.some(k => ['imageMessage','videoMessage','audioMessage','documentMessage'].includes(k));
-      if (isNull || hasVO || hasMed) {
-        console.log(chalk.magenta(
-          `[MSG-SCAN] type=${type} fromMe=${m.key.fromMe} null=${isNull} idx=${messages.indexOf(m)}/${messages.length}\n` +
-          `           jid=${m.key.remoteJid} keys=${keys.join(', ') || '(none)'}\n` +
-          `           stubType=${m.messageStubType} stubParams=${JSON.stringify(m.messageStubParameters)}\n` +
-          `           fullMsg=${JSON.stringify({key:m.key,messageStubType:m.messageStubType,messageStubParameters:m.messageStubParameters})}`
-        ));
-      }
-    }
-
     const msg = messages[0];
+
+    // 👁️ Cek view once "unavailable" — WA kirim stub tanpa konten ke bot
+    if (msg && !msg.message && msg.messageStubParameters?.[1]) {
+      try {
+        const rawNode = JSON.parse(msg.messageStubParameters[1]);
+        const unavail = Array.isArray(rawNode.content)
+          ? rawNode.content.find(c => c.tag === 'unavailable')
+          : null;
+        if (unavail?.attrs?.type === 'view_once' && msg.key.remoteJid !== 'status@broadcast') {
+          for (const plugin of plugins) {
+            if (typeof plugin.handleViewOnce === 'function') {
+              try { await plugin.handleViewOnce(sock, msg, rawNode); } catch (e) {
+                console.error(`[handleViewOnce] ${plugin.name}:`, e.message);
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
 
     if (!msg?.message || msg.key.remoteJid === 'status@broadcast') return;
 
