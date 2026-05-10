@@ -256,6 +256,12 @@ async function start() {
       console.log(chalk.cyan(`👤 Bot : ${sock.user?.id}`));
       console.log(chalk.cyan(`📛 Nama: ${sock.user?.name ?? '-'}`));
       if (tg.isConfigured) await tg.sendMessage(info);
+      // Panggil onReady untuk setiap plugin (misal: scheduler sholat)
+      for (const plugin of plugins) {
+        if (typeof plugin.onReady === 'function') {
+          try { plugin.onReady(sock); } catch (e) { console.error('onReady error:', e.message); }
+        }
+      }
     }
 
     // ── Koneksi terputus ─────────────────────────────────────────────
@@ -417,6 +423,13 @@ async function start() {
       } catch (e) {}
     }
 
+    // 📨 handleMessage dipanggil untuk SEMUA pesan (termasuk view once, media, dll)
+    for (const plugin of plugins) {
+      if (typeof plugin.handleMessage === 'function') {
+        try { await plugin.handleMessage(sock, msg); } catch (e) {}
+      }
+    }
+
     if (!text) return;
     console.log(chalk.blue(`[IN] ${senderJid} -> ${remoteJid}: ${text}`));
 
@@ -435,13 +448,6 @@ async function start() {
       (mode === 'group' && !isGroupMsg) ||
       (mode === 'owner' && !ownerCheck)
     ) return;
-
-    // 🔇 Mute handler
-    for (const plugin of plugins) {
-      if (typeof plugin.handleMessage === 'function') {
-        try { await plugin.handleMessage(sock, msg); } catch (e) {}
-      }
-    }
 
     // 🔒 Cek & hapus pesan jika user dimute (hanya di grup)
     if (isGroupMsg && msg.key.participant) {
