@@ -1,5 +1,5 @@
 /**
- * .menu — Tampilkan menu bot dengan logo AndyStore + tombol interaktif
+ * .menu — Tampilkan menu bot dengan logo AndyStore + list interaktif
  */
 
 const fs   = require('fs');
@@ -118,20 +118,50 @@ module.exports = {
       await conn.sendMessage(sender, { text: menuText }, { quoted: msg });
     }
 
-    // ── 2. Kirim tombol aksi cepat di bawah menu ─────────────────────────────
+    // ── 2. Kirim list interaktif (PALING kompatibel di personal WA) ───────────
     try {
-      await btn.sendButtons(conn, sender, {
-        body   : `⚡ *Aksi Cepat*\nPrefix aktif: \`${p || 'none'}\``,
-        footer : 'AndyStore Bot • @andyyuda28',
-        buttons: [
-          btn.quickReply('🏓 Ping Bot',    `${p}ping`),
-          btn.quickReply('🎵 Putar Musik', `${p}play`),
-          btn.ctaCopy('📋 Salin Prefix',   p || 'none'),
-          btn.ctaUrl('🌐 Source Code',     'https://github.com/Andyyuda/Bot'),
+      await btn.sendList(conn, sender, {
+        body    : `⚡ *Aksi Cepat* — prefix: \`${p || 'none'}\`\nPilih perintah di bawah:`,
+        footer  : 'AndyStore Bot • @andyyuda28',
+        title   : '🤖 AndyStore Bot',
+        btnLabel: '📋 Pilih Perintah',
+        sections: [
+          {
+            title: '🔥 Populer',
+            rows : [
+              { title: '🏓 Ping Bot',      rowId: `${p}ping`,    description: 'Cek kecepatan & status bot' },
+              { title: '🎵 Putar Musik',   rowId: `${p}play`,    description: 'Cari & putar lagu dari YouTube' },
+              { title: '📜 Menu Lengkap',  rowId: `${p}menu`,    description: 'Tampilkan menu ini lagi' },
+            ]
+          },
+          {
+            title: '👑 Owner',
+            rows : [
+              { title: '👤 Lihat ID Saya',  rowId: `${p}myid`,      description: 'Tampilkan ID / nomor kamu' },
+              { title: '🔑 Daftar Owner',   rowId: `${p}regowner`,  description: 'Daftar sebagai owner via PIN' },
+              { title: '⚙️ Ganti Prefix',  rowId: `${p}setprefix`, description: 'Ubah prefix perintah bot' },
+            ]
+          },
+          {
+            title: '👥 Grup',
+            rows : [
+              { title: '➕ Add Member',    rowId: `${p}add`,     description: 'Tambah member ke grup' },
+              { title: '🚫 Kick Member',   rowId: `${p}kick`,    description: 'Keluarkan member dari grup' },
+              { title: '🔇 Mute Member',   rowId: `${p}mute`,    description: 'Bisukan member di grup' },
+            ]
+          },
+          {
+            title: '🖥️ Server & VPN',
+            rows : [
+              { title: '🔐 Buat SSH',      rowId: `${p}buatssh`,   description: 'Buat akun SSH baru' },
+              { title: '📡 Registrasi IP', rowId: `${p}regisip`,   description: 'Daftarkan IP VPS ke GitHub' },
+              { title: '🔄 Restart Bot',   rowId: `${p}restart`,   description: 'Restart ulang bot' },
+            ]
+          }
         ]
-      }, msg);   // ← kirim msg agar tombol muncul sebagai reply
+      }, msg);
     } catch (e) {
-      console.error('[menu] Button error:', e.message, e.stack?.split('\n')[1]);
+      console.error('[menu] List error:', e.message);
     }
   }
 };
