@@ -121,18 +121,17 @@ module.exports = {
     // ── 2. Kirim tombol aksi cepat di bawah menu ─────────────────────────────
     try {
       await btn.sendButtons(conn, sender, {
-        body   : `⚡ *Aksi Cepat*\nPrefix aktif: \`${p}\``,
+        body   : `⚡ *Aksi Cepat*\nPrefix aktif: \`${p || 'none'}\``,
         footer : 'AndyStore Bot • @andyyuda28',
         buttons: [
-          btn.quickReply('🏓 Ping Bot',         `${p}ping`),
-          btn.quickReply('🎵 Putar Musik',       `${p}play`),
-          btn.ctaCopy('📋 Salin Prefix',        p || 'none'),
-          btn.ctaUrl('🌐 Source Code', 'https://github.com/Andyyuda/Bot'),
+          btn.quickReply('🏓 Ping Bot',    `${p}ping`),
+          btn.quickReply('🎵 Putar Musik', `${p}play`),
+          btn.ctaCopy('📋 Salin Prefix',   p || 'none'),
+          btn.ctaUrl('🌐 Source Code',     'https://github.com/Andyyuda/Bot'),
         ]
-      });
+      }, msg);   // ← kirim msg agar tombol muncul sebagai reply
     } catch (e) {
-      // Tombol tidak didukung di versi WA ini — lanjut tanpa error
-      console.log('[menu] Button tidak terkirim:', e.message);
+      console.error('[menu] Button error:', e.message, e.stack?.split('\n')[1]);
     }
   }
 };
