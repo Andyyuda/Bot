@@ -11,4 +11,5 @@
 module.exports = {
   owner: ['248335797633091'],
   ownerPin: 'gantipin123',
+  prefix: '.',   // prefix default (bisa diubah via .setprefix)
 };

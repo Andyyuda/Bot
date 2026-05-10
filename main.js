@@ -17,6 +17,16 @@ const tg = require('./lib/telegram');
 const PLUGIN_DIR = './plugins';
 global.userState = {};
 
+// ── Ambil prefix aktif (dari database/prefix.json atau setting.prefix) ────────
+function getPrefix() {
+  try {
+    const db = JSON.parse(fs.readFileSync(path.join(__dirname, 'database/prefix.json')));
+    return typeof db.prefix === 'string' ? db.prefix : (setting.prefix ?? '.');
+  } catch {
+    return setting.prefix ?? '.';
+  }
+}
+
 // 🔌 Load semua plugin
 let plugins = [];
 fs.readdirSync(PLUGIN_DIR).forEach(file => {
@@ -46,7 +56,10 @@ async function start() {
   let modeLogin = null;
   let nomorTarget = null;
 
-  if (!state.creds.registered) {
+  // Sudah login jika ada info akun (me) atau registered flag — skip prompt login
+  const isAlreadyLoggedIn = !!(state.creds.me || state.creds.registered);
+
+  if (!isAlreadyLoggedIn) {
     if (tg.isConfigured) {
       // ─── LOGIN VIA TELEGRAM ───────────────────────────────────────
       console.log(chalk.cyan('📲 Bot belum terdaftar. Mengirim pilihan login ke Telegram...'));
@@ -325,11 +338,36 @@ async function start() {
       }
     }
 
-    // ⚙️ Eksekusi plugin
-    const [command, ...args] = text.trim().split(' ');
-    const plugin = plugins.find(p =>
-      p.name === command.toLowerCase() || (Array.isArray(p.command) && p.command.includes(command.toLowerCase()))
+    // ⚙️ Eksekusi plugin dengan prefix dinamis
+    const prefix = getPrefix();
+    const textTrimmed = text.trim();
+    const spaceIdx = textTrimmed.indexOf(' ');
+    const commandRaw = spaceIdx === -1 ? textTrimmed : textTrimmed.substring(0, spaceIdx);
+    const args = spaceIdx === -1 ? [] : textTrimmed.substring(spaceIdx + 1).trim().split(' ');
+    const commandLow = commandRaw.toLowerCase();
+
+    // Cari plugin: coba exact match dulu (untuk $ dan plugin non-prefix)
+    let plugin = plugins.find(p =>
+      p.name === commandLow ||
+      (Array.isArray(p.command) && p.command.includes(commandLow))
     );
+
+    // Kalau belum ketemu, coba strip prefix lalu tambah '.' di depan
+    if (!plugin) {
+      let base = null;
+      if (prefix !== '' && commandRaw.startsWith(prefix)) {
+        base = commandRaw.substring(prefix.length).toLowerCase();
+      } else if (prefix === '') {
+        base = commandLow;
+      }
+      if (base !== null) {
+        const dotCmd = '.' + base;
+        plugin = plugins.find(p =>
+          p.name === dotCmd ||
+          (Array.isArray(p.command) && p.command.includes(dotCmd))
+        );
+      }
+    }
 
     if (plugin && typeof plugin.execute === 'function') {
       try {
