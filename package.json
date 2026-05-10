@@ -25,6 +25,7 @@
     "javascript-obfuscator": "^4.1.1",
     "node-fetch": "^2.6.7",
     "pino": "^8.17.0",
+    "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "ssh2": "^1.16.0"
   },

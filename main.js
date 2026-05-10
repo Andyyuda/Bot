@@ -12,6 +12,7 @@ const chalk = require('chalk');
 const readline = require('readline');
 const setting = require('./setting');
 const { getPhoneNumber, isOwner } = require('./lib/helper');
+const tg = require('./lib/telegram');
 
 const PLUGIN_DIR = './plugins';
 global.userState = {};
@@ -31,7 +32,7 @@ global.plugins = plugins;
 function tanyaInput(prompt) {
   return new Promise(resolve => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(prompt, (answer) => {
+    rl.question(prompt, answer => {
       rl.close();
       resolve(answer.trim());
     });
@@ -46,34 +47,65 @@ async function start() {
   let nomorTarget = null;
 
   if (!state.creds.registered) {
-    console.log(chalk.bgCyan.black('\n╔══════════════════════════════════╗'));
-    console.log(chalk.bgCyan.black('   🤖  BOTWA — PILIH METODE LOGIN   '));
-    console.log(chalk.bgCyan.black('╚══════════════════════════════════╝\n'));
-    console.log(chalk.white('  [1] Scan QR Code  ') + chalk.gray('(scan dari terminal)'));
-    console.log(chalk.white('  [2] Pairing Code  ') + chalk.gray('(masukkan kode di WA → Linked Devices)\n'));
+    if (tg.isConfigured) {
+      // ─── LOGIN VIA TELEGRAM ───────────────────────────────────────
+      console.log(chalk.cyan('📲 Bot belum terdaftar. Mengirim pilihan login ke Telegram...'));
+      await tg.sendMessage(
+        '🤖 <b>BotWA siap login!</b>\n\n' +
+        'Pilih metode:\n' +
+        '<b>1</b> — Scan QR Code\n' +
+        '<b>2</b> — Pairing Code (nomor HP)\n\n' +
+        'Balas dengan angka <b>1</b> atau <b>2</b>'
+      );
 
-    const pilihan = await tanyaInput(chalk.cyan('Pilih metode [1/2]: '));
+      const pilihan = await tg.waitReply(120000);
 
-    if (pilihan === '1' || pilihan.toLowerCase() === 'q') {
-      modeLogin = 'qr';
-      console.log(chalk.green('\n✅ Mode QR dipilih. QR akan muncul di bawah...\n'));
-    } else {
-      modeLogin = 'pairing';
-      nomorTarget = (await tanyaInput(chalk.cyan('📱 Masukkan nomor HP (contoh: 628xxxxxxxxxx): ')))
-        .replace(/[^0-9]/g, '');
-      if (!nomorTarget) {
-        console.log(chalk.red('❌ Nomor tidak boleh kosong. Coba lagi.'));
-        return start();
+      if (pilihan === '1') {
+        modeLogin = 'qr';
+        await tg.sendMessage('✅ Mode QR dipilih. QR akan dikirim sebentar...');
+      } else if (pilihan === '2') {
+        modeLogin = 'pairing';
+        await tg.sendMessage('📱 Masukkan nomor HP:\n<code>628xxxxxxxxxx</code>\n(tanpa + atau spasi)');
+        const input = await tg.waitReply(120000);
+        nomorTarget = (input || '').replace(/[^0-9]/g, '');
+        if (!nomorTarget || nomorTarget.length < 10) {
+          await tg.sendMessage('❌ Nomor tidak valid. Restart bot dan coba lagi.');
+          return;
+        }
+        await tg.sendMessage(`⏳ Nomor diterima: <code>${nomorTarget}</code>\nMeminta pairing code...`);
+      } else {
+        await tg.sendMessage('❌ Input tidak dikenali. Restart bot dan coba lagi.');
+        return;
       }
+      // ─────────────────────────────────────────────────────────────
+    } else {
+      // ─── LOGIN VIA TERMINAL ───────────────────────────────────────
+      console.log(chalk.bgCyan.black('\n╔══════════════════════════════════╗'));
+      console.log(chalk.bgCyan.black('   🤖  BOTWA — PILIH METODE LOGIN   '));
+      console.log(chalk.bgCyan.black('╚══════════════════════════════════╝\n'));
+      console.log(chalk.white('  [1] Scan QR Code  ') + chalk.gray('(scan dari terminal)'));
+      console.log(chalk.white('  [2] Pairing Code  ') + chalk.gray('(masukkan kode di WA → Linked Devices)\n'));
+
+      const pilihan = await tanyaInput(chalk.cyan('Pilih metode [1/2]: '));
+
+      if (pilihan === '1' || pilihan.toLowerCase() === 'q') {
+        modeLogin = 'qr';
+        console.log(chalk.green('\n✅ Mode QR dipilih. QR akan muncul di bawah...\n'));
+      } else {
+        modeLogin = 'pairing';
+        nomorTarget = (await tanyaInput(chalk.cyan('📱 Masukkan nomor HP (contoh: 628xxxxxxxxxx): ')))
+          .replace(/[^0-9]/g, '');
+        if (!nomorTarget) {
+          console.log(chalk.red('❌ Nomor tidak boleh kosong. Coba lagi.'));
+          return start();
+        }
+      }
+      // ─────────────────────────────────────────────────────────────
     }
   }
 
   // Filter log Baileys yang tidak perlu (noise)
-  const SKIP_ERRORS = [
-    'failed to decrypt message',
-    'init queries',
-  ];
-
+  const SKIP_ERRORS = ['failed to decrypt message', 'init queries'];
   const baileysLogger = {
     level: 'silent',
     trace: () => {}, debug: () => {}, info: () => {},
@@ -86,7 +118,7 @@ async function start() {
       console.log(chalk.red(`[WA ERROR] ${m ?? ''}`), JSON.stringify(o ?? {}));
     },
     fatal: (o, m) => console.log(chalk.bgRed.white(`[WA FATAL] ${m ?? ''}`)),
-    child: function() { return this; },
+    child: function() { return this; }
   };
 
   const sock = makeWASocket({
@@ -94,13 +126,13 @@ async function start() {
     logger: baileysLogger,
     auth: {
       creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, baileysLogger),
+      keys: makeCacheableSignalKeyStore(state.keys, baileysLogger)
     },
     printQRInTerminal: false,
     browser: Browsers.macOS('Safari'),
     syncFullHistory: false,
     markOnlineOnConnect: false,
-    generateHighQualityLinkPreview: false,
+    generateHighQualityLinkPreview: false
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -110,56 +142,95 @@ async function start() {
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
+    // ── QR / Pairing Code ────────────────────────────────────────────
     if (qr && !state.creds.registered && !sudahLogin) {
+
+      // Mode Pairing Code
       if (modeLogin === 'pairing' && nomorTarget) {
         sudahLogin = true;
         try {
           console.log(chalk.cyan('⏳ Meminta pairing code ke WhatsApp...'));
           const code = await sock.requestPairingCode(nomorTarget);
           const fmt = code.match(/.{1,4}/g).join('-');
-          console.log(chalk.bgGreen.black('\n╔══════════════════════════════╗'));
-          console.log(chalk.bgGreen.black('  🔑 PAIRING CODE BOT WHATSAPP  '));
-          console.log(chalk.bgGreen.black('╚══════════════════════════════╝'));
-          console.log(chalk.yellow('\n  Kode : ') + chalk.bold.white(fmt));
-          console.log(chalk.cyan(`  Nomor: ${nomorTarget}\n`));
-          console.log(chalk.gray('  1. Buka WhatsApp/WA Business di HP'));
-          console.log(chalk.gray('  2. ⋮ → Perangkat Tertaut → Tautkan Perangkat'));
-          console.log(chalk.gray('  3. Tautkan dengan nomor telepon'));
-          console.log(chalk.gray(`  4. Ketik kode: ${chalk.bold(fmt)}`));
-          console.log(chalk.red('\n  ⚠️  Berlaku ±60 detik — masukkan SEGERA!\n'));
+
+          if (tg.isConfigured) {
+            await tg.sendMessage(
+              '🔑 <b>PAIRING CODE BOT WHATSAPP</b>\n\n' +
+              `Kode: <code>${fmt}</code>\n` +
+              `Nomor: <code>${nomorTarget}</code>\n\n` +
+              '📋 Cara pakai:\n' +
+              '1. Buka WhatsApp di HP\n' +
+              '2. ⋮ → Perangkat Tertaut → Tautkan Perangkat\n' +
+              '3. Tautkan dengan nomor telepon\n' +
+              `4. Ketik kode: <b>${fmt}</b>\n\n` +
+              '⚠️ Berlaku ±60 detik — masukkan SEGERA!'
+            );
+          } else {
+            console.log(chalk.bgGreen.black('\n╔══════════════════════════════╗'));
+            console.log(chalk.bgGreen.black('  🔑 PAIRING CODE BOT WHATSAPP  '));
+            console.log(chalk.bgGreen.black('╚══════════════════════════════╝'));
+            console.log(chalk.yellow('\n  Kode : ') + chalk.bold.white(fmt));
+            console.log(chalk.cyan(`  Nomor: ${nomorTarget}\n`));
+            console.log(chalk.gray('  1. Buka WhatsApp di HP'));
+            console.log(chalk.gray('  2. ⋮ → Perangkat Tertaut → Tautkan Perangkat'));
+            console.log(chalk.gray('  3. Tautkan dengan nomor telepon'));
+            console.log(chalk.gray(`  4. Ketik kode: ${chalk.bold(fmt)}`));
+            console.log(chalk.red('\n  ⚠️  Berlaku ±60 detik — masukkan SEGERA!\n'));
+          }
         } catch (err) {
-          console.log(chalk.red(`\n❌ Gagal dapat pairing code: ${err.message}`));
-          console.log(chalk.yellow('💡 Coba: rm -rf auth/ lalu restart. Atau pilih mode [1] QR.\n'));
+          const errMsg = `❌ Gagal dapat pairing code: ${err.message}\n💡 Coba rm -rf auth/ lalu restart.`;
+          if (tg.isConfigured) await tg.sendMessage(errMsg);
+          else console.log(chalk.red(errMsg));
           sudahLogin = false;
         }
       }
 
+      // Mode QR
       if (modeLogin === 'qr') {
-        try {
-          const qrcode = require('qrcode-terminal');
-          console.log(chalk.cyan('\n📷 Scan QR berikut dengan WhatsApp:\n'));
-          qrcode.generate(qr, { small: true });
-          console.log(chalk.gray('  QR refresh otomatis tiap ~30 detik.\n'));
-        } catch {
-          console.log(chalk.red('❌ qrcode-terminal tidak tersedia.'));
+        if (tg.isConfigured) {
+          try {
+            const qrcode = require('qrcode');
+            const buf = await qrcode.toBuffer(qr, { type: 'png', scale: 6, margin: 2 });
+            await tg.sendPhoto(buf, '📷 <b>Scan QR ini dengan WhatsApp</b>\n⏰ Berlaku ~30 detik\n\nJika expired, QR baru akan dikirim otomatis.');
+          } catch (e) {
+            await tg.sendMessage(`❌ Gagal kirim QR: ${e.message}`);
+          }
+        } else {
+          try {
+            const qrTerminal = require('qrcode-terminal');
+            console.log(chalk.cyan('\n📷 Scan QR berikut dengan WhatsApp:\n'));
+            qrTerminal.generate(qr, { small: true });
+            console.log(chalk.gray('  QR refresh otomatis tiap ~30 detik.\n'));
+          } catch {
+            console.log(chalk.red('❌ qrcode-terminal tidak tersedia.'));
+          }
         }
       }
     }
 
+    // ── Terhubung ────────────────────────────────────────────────────
     if (connection === 'open') {
+      const info = `✅ <b>Bot WhatsApp terhubung!</b>\n👤 ${sock.user?.id}\n📛 ${sock.user?.name ?? '-'}`;
       console.log(chalk.green('\n✅ Terhubung ke WhatsApp!'));
       console.log(chalk.cyan(`👤 Bot : ${sock.user?.id}`));
       console.log(chalk.cyan(`📛 Nama: ${sock.user?.name ?? '-'}`));
+      if (tg.isConfigured) await tg.sendMessage(info);
     }
 
+    // ── Koneksi terputus ─────────────────────────────────────────────
     if (connection === 'close') {
       const reasonCode = lastDisconnect?.error?.output?.statusCode;
+
       if (reasonCode === DisconnectReason.loggedOut) {
-        console.log(chalk.red('❌ Logout permanen. Hapus folder auth/ untuk login ulang.'));
+        const msg = '❌ Logout permanen. Hapus folder auth/ untuk login ulang.';
+        console.log(chalk.red(msg));
+        if (tg.isConfigured) await tg.sendMessage(msg);
         fs.rmSync('./auth', { recursive: true, force: true });
         start();
       } else if (reasonCode === DisconnectReason.badSession) {
-        console.log(chalk.red('❌ Sesi rusak. Menghapus auth/ dan restart...'));
+        const msg = '❌ Sesi rusak. Menghapus auth/ dan restart...';
+        console.log(chalk.red(msg));
+        if (tg.isConfigured) await tg.sendMessage(msg);
         fs.rmSync('./auth', { recursive: true, force: true });
         start();
       } else {
@@ -189,13 +260,10 @@ async function start() {
 
     const remoteJid = msg.key.remoteJid;
     const sender = remoteJid;
-
     const senderJid = msg.key.participant || remoteJid;
     const senderNumber = getPhoneNumber(senderJid);
-
     const isGroupMsg = remoteJid.endsWith('@g.us');
     const isPrivate = !isGroupMsg;
-
     const ownerCheck = isOwner(senderJid, setting.owner);
 
     let text = msg.message?.conversation ||
