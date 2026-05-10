@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const muteFile = path.join(__dirname, '../mute.json');
-const { isOwner, getPhoneNumber } = require('../lib/helper');
+const { isOwner, isSenderAdmin } = require('../lib/helper');
 const setting = require('../setting');
 
 module.exports = {
@@ -9,21 +9,19 @@ module.exports = {
   command: ['.unmute'],
   tags: ['admin'],
   async execute(sock, sender, args, msg) {
-    // ✅ FIX: gunakan remoteJid sebagai groupId
     const groupId = msg.key.remoteJid;
 
     if (!groupId.endsWith('@g.us')) {
       return await sock.sendMessage(sender, { text: '❌ Perintah ini hanya bisa digunakan di dalam grup.' }, { quoted: msg });
     }
 
-    // ✅ FIX LID: ambil JID pengirim dengan benar
     const pengirim = msg.key.participant || msg.key.remoteJid;
+
     if (!isOwner(pengirim, setting.owner)) {
       let isAdmin = false;
       try {
         const meta = await sock.groupMetadata(groupId);
-        const admins = meta.participants.filter(p => p.admin).map(p => p.id);
-        isAdmin = admins.some(a => getPhoneNumber(a) === getPhoneNumber(pengirim));
+        isAdmin = isSenderAdmin(pengirim, meta.participants);
       } catch (e) {}
       if (!isAdmin) {
         return await sock.sendMessage(sender, { text: '❌ Hanya *admin grup* atau *owner* yang bisa unmute member.' }, { quoted: msg });
@@ -37,7 +35,7 @@ module.exports = {
     const mentioned = msg.message.extendedTextMessage.contextInfo.mentionedJid[0];
     let db = fs.existsSync(muteFile) ? JSON.parse(fs.readFileSync(muteFile)) : {};
 
-    if (db[groupId] && db[groupId][mentioned]) {
+    if (db[groupId]?.[mentioned]) {
       delete db[groupId][mentioned];
       fs.writeFileSync(muteFile, JSON.stringify(db, null, 2));
       await sock.sendMessage(sender, { text: `🔊 *${mentioned.split(':')[0].split('@')[0]}* telah diunmute.` }, { quoted: msg });

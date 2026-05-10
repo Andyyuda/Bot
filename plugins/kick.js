@@ -1,4 +1,4 @@
-const { isOwner } = require('../lib/helper');
+const { isOwner, isBotAdmin, isSenderAdmin } = require('../lib/helper');
 const setting = require('../setting');
 
 module.exports = {
@@ -7,25 +7,18 @@ module.exports = {
   execute: async (conn, sender, args, msg) => {
     const groupId = msg.key.remoteJid;
 
-    // ✅ Hanya bisa di grup
     if (!groupId.endsWith('@g.us')) {
       return conn.sendMessage(sender, { text: '❌ Perintah ini hanya bisa digunakan di dalam grup.' }, { quoted: msg });
     }
 
-    // ✅ FIX LID: ambil JID pengirim dengan benar
     const pengirim = msg.key.participant || msg.key.remoteJid;
 
-    // ✅ Cek apakah bot adalah admin grup
     let botIsAdmin = false;
     let senderIsAdmin = false;
     try {
       const groupMeta = await conn.groupMetadata(groupId);
-      const admins = groupMeta.participants.filter(p => p.admin).map(p => p.id);
-      const botId = conn.user.id;
-      // ✅ FIX LID: normalisasi perbandingan admin
-      const { getPhoneNumber } = require('../lib/helper');
-      botIsAdmin = admins.some(a => getPhoneNumber(a) === getPhoneNumber(botId));
-      senderIsAdmin = admins.some(a => getPhoneNumber(a) === getPhoneNumber(pengirim)) ||
+      botIsAdmin = isBotAdmin(conn, groupMeta.participants);
+      senderIsAdmin = isSenderAdmin(pengirim, groupMeta.participants) ||
                       isOwner(pengirim, setting.owner);
     } catch (e) {
       console.error('❌ Gagal cek admin:', e.message);
@@ -45,7 +38,6 @@ module.exports = {
     }
 
     try {
-      // ✅ FIX: gunakan groupId (remoteJid) bukan sender
       await conn.groupParticipantsUpdate(groupId, mentioned, 'remove');
       await conn.sendMessage(sender, { text: `✅ Berhasil mengeluarkan anggota.` }, { quoted: msg });
     } catch (e) {

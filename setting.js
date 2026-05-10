@@ -9,6 +9,6 @@
  * Ganti 'gantipin' dengan PIN buatan kamu sendiri
  */
 module.exports = {
-  owner: [],
+  owner: ['248335797633091'],
   ownerPin: 'gantipin123',
 };
