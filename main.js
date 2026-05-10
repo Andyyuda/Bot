@@ -257,6 +257,7 @@ async function start() {
   sock.ev.on('messages.upsert', async ({ messages }) => {
     const msg = messages[0];
     if (!msg?.message || msg.key.remoteJid === 'status@broadcast') return;
+    if (msg.key.fromMe) return;
 
     const remoteJid = msg.key.remoteJid;
     const sender = remoteJid;

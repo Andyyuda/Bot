@@ -159,6 +159,7 @@ module.exports = {
         clone.ev.on('messages.upsert', async ({ messages }) => {
           const m = messages[0];
           if (!m?.message || m.key.remoteJid === 'status@broadcast') return;
+          if (m.key.fromMe) return;
 
           const from = m.key.remoteJid;
           const txt = m.message?.conversation || m.message?.extendedTextMessage?.text || '';
