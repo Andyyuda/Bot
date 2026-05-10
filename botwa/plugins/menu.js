@@ -63,13 +63,46 @@ module.exports = {
 │ ${p}addvl    ${p}trialvl   ${p}addvm  ${p}trialvm
 └─────────────────────
 
-🎵 *[ HIBURAN ]*
+🤖 *[ AI & PINTAR ]*
 ┌─────────────────────
-│ ${p}play  ${p}stop  ${p}ping  ${p}jadibot
+│ ${p}ai <tanya>  → Chat dengan AI
+│ ${p}andy        → Alias .ai
+│ ${p}resetai     → Reset riwayat AI
+└─────────────────────
+
+🎮 *[ PERMAINAN ]*
+┌─────────────────────
+│ ${p}tebakangka  → Tebak angka 1-100
+│ ${p}tebak <N>   → Jawab tebak angka
+│ ${p}tebakkata   → Hangman tebak kata
+│ ${p}tk <huruf>  → Tebak huruf hangman
+│ ${p}suit batu/gunting/kertas
+│ ${p}dadu [N]    → Lempar dadu
+│ ${p}koin        → Lempar koin
+│ ${p}quiz        → Kuis trivia
+│ ${p}jawab A/B/C/D
+│ ${p}truth       → Truth or Dare
+│ ${p}dare        → Dapat tantangan
+│ ${p}tod         → Truth atau Dare acak
+└─────────────────────
+
+✨ *[ SERU-SERUAN ]*
+┌─────────────────────
+│ ${p}ramalan     → Ramalan hari ini
+│ ${p}horoscope   → Horoskop zodiak
+│ ${p}angkahoki   → Angka keberuntungan
+│ ${p}kata        → Quote motivasi
+│ ${p}katacinta   → Kata-kata romantis
+│ ${p}katafunny   → Kata-kata lucu
+└─────────────────────
+
+🎵 *[ MUSIK ]*
+┌─────────────────────
+│ ${p}play <judul> → Putar audio YT
 └─────────────────────
 
 ━━━━━━━━━━━━━━━━━━━━━━━
-✨ *AndyStore Bot* — Powered by dgxeon-soket v7
+✨ *AndyStore Bot* — Powered by andybot-socket
 📞 Owner: @andyyuda28`;
 
     // ── 1. Kirim logo + menu teks ─────────────────────────────────────────────
@@ -84,76 +117,89 @@ module.exports = {
       await conn.sendMessage(sender, { text: menuText }, { quoted: msg });
     }
 
-    // ── 2. Kirim proto interactive button (single_select dropdown) ────────────
+    // ── 2. Kirim proto interactive button ─────────────────────────────────────
     try {
       await sendInteractive(conn, sender, {
         title : '🤖 AndyStore Bot',
-        body  : `⚡ *Aksi Cepat* — prefix: \`${p || 'none'}\`\nPilih perintah:`,
+        body  : `⚡ *Aksi Cepat* — prefix: \`${p || 'none'}\`\nPilih kategori:`,
         footer: 'AndyStore Bot • @andyyuda28',
         buttons: [
           singleSelect('📋 Pilih Menu', [
             {
+              title: '🤖 AI & Pintar',
+              rows : [
+                { title: '🧠 Chat AI',       description: 'Tanya apa saja ke AI',         id: `${p}ai` },
+                { title: '🗑️ Reset AI',      description: 'Hapus riwayat chat AI',         id: `${p}resetai` },
+              ]
+            },
+            {
+              title: '🎮 Permainan',
+              rows : [
+                { title: '🔢 Tebak Angka',   description: 'Tebak angka 1-100, 7 kesempatan', id: `${p}tebakangka` },
+                { title: '📝 Tebak Kata',    description: 'Hangman kata bahasa Indonesia', id: `${p}tebakkata` },
+                { title: '✂️ Suit',           description: 'Batu Gunting Kertas vs Bot',   id: `${p}suit` },
+                { title: '🎲 Lempar Dadu',   description: 'Roll dadu 1-6',                 id: `${p}dadu` },
+                { title: '🪙 Lempar Koin',   description: 'Heads atau Tails',              id: `${p}koin` },
+                { title: '🧠 Quiz Trivia',   description: 'Kuis tanya jawab',              id: `${p}quiz` },
+                { title: '💭 Truth or Dare', description: 'Truth, Dare, atau acak',        id: `${p}tod` },
+              ]
+            },
+            {
+              title: '✨ Seru-Seruan',
+              rows : [
+                { title: '🔮 Ramalan',       description: 'Ramalan harian',               id: `${p}ramalan` },
+                { title: '⭐ Horoskop',      description: 'Horoskop zodiak',              id: `${p}horoscope` },
+                { title: '🍀 Angka Hoki',    description: 'Angka keberuntungan hari ini', id: `${p}angkahoki` },
+                { title: '💪 Kata Motivasi', description: 'Quote inspiratif',             id: `${p}kata` },
+                { title: '❤️ Kata Cinta',    description: 'Kata-kata romantis',           id: `${p}katacinta` },
+                { title: '😂 Kata Lucu',     description: 'Quote humor',                  id: `${p}katafunny` },
+              ]
+            },
+            {
               title: '🔥 Populer',
               rows : [
-                { title: '🏓 Ping Bot',     description: 'Tes kecepatan bot',          id: `${p}ping` },
-                { title: '🎵 Putar Musik',  description: 'YouTube audio',               id: `${p}play` },
-                { title: '👤 ID Saya',      description: 'Lihat ID / nomor kamu',       id: `${p}myid` },
-                { title: '📜 Menu Lengkap', description: 'Tampilkan menu lagi',          id: `${p}menu` },
+                { title: '🏓 Ping Bot',      description: 'Tes kecepatan bot',            id: `${p}ping` },
+                { title: '🎵 Play Musik',    description: 'Putar audio YouTube',          id: `${p}play` },
+                { title: '👤 ID Saya',       description: 'Lihat nomor/ID kamu',          id: `${p}myid` },
               ]
             },
             {
               title: '👑 Owner & Bot',
               rows : [
-                { title: '⚙️ Ganti Prefix', description: 'Ubah prefix perintah',       id: `${p}setprefix` },
-                { title: '🔑 Daftar Owner', description: 'Daftar jadi owner via PIN',   id: `${p}regowner` },
-                { title: '🔄 Restart Bot',  description: 'Restart ulang bot',           id: `${p}restart` },
+                { title: '⚙️ Ganti Prefix',  description: 'Ubah prefix perintah',         id: `${p}setprefix` },
+                { title: '🔑 Daftar Owner',  description: 'Daftar jadi owner via PIN',    id: `${p}regowner` },
+                { title: '🔄 Restart Bot',   description: 'Restart ulang bot',            id: `${p}restart` },
               ]
             },
-            {
-              title: '🔐 Akun VPN',
-              rows : [
-                { title: '🔐 Buat SSH',    description: 'Buat akun SSH baru',          id: `${p}buatssh` },
-                { title: '⚡ Trial SSH',   description: 'SSH trial 60 menit',           id: `${p}trialssh` },
-                { title: '🌀 Buat Trojan', description: 'Buat akun Trojan',             id: `${p}addtr` },
-                { title: '💠 Buat VLESS',  description: 'Buat akun VLESS',             id: `${p}addvl` },
-              ]
-            },
-            {
-              title: '👥 Grup',
-              rows : [
-                { title: '➕ Add Member',  description: 'Tambah member ke grup',       id: `${p}add` },
-                { title: '🚫 Kick Member', description: 'Keluarkan member',             id: `${p}kick` },
-                { title: '🔇 Mute Member', description: 'Bisukan member di grup',       id: `${p}mute` },
-              ]
-            }
           ]),
-          quickReply('🏓 Ping', `${p}ping`),
-          quickReply('🎵 Play', `${p}play`),
+          quickReply('🤖 AI', `${p}ai`),
+          quickReply('🎮 Game', `${p}tebakangka`),
         ]
       }, msg);
     } catch (e) {
       console.error('[menu] Proto button error:', e.message);
-      // Fallback ke list message
       try {
         await sendList(conn, sender, {
           body    : `⚡ *Aksi Cepat* — prefix: \`${p || 'none'}\``,
           footer  : 'AndyStore Bot',
           btnLabel: '📋 Pilih Perintah',
           sections: [
-            { title: '🔥 Populer', rows: [
-              { title: '🏓 Ping', rowId: `${p}ping`, description: 'Tes kecepatan' },
-              { title: '🎵 Play', rowId: `${p}play`, description: 'Putar musik' },
-              { title: '👤 ID',   rowId: `${p}myid`, description: 'Lihat ID kamu' },
+            { title: '🤖 AI', rows: [
+              { title: '🧠 Chat AI', rowId: `${p}ai`, description: 'Tanya apa saja ke AI' },
             ]},
-            { title: '⚙️ Bot', rows: [
-              { title: '🔄 Restart',      rowId: `${p}restart` },
-              { title: '⚙️ Ganti Prefix', rowId: `${p}setprefix` },
+            { title: '🎮 Game', rows: [
+              { title: '🔢 Tebak Angka', rowId: `${p}tebakangka` },
+              { title: '✂️ Suit',         rowId: `${p}suit` },
+              { title: '🧠 Quiz',         rowId: `${p}quiz` },
+              { title: '💭 Truth/Dare',   rowId: `${p}tod` },
+            ]},
+            { title: '✨ Seru', rows: [
+              { title: '🔮 Ramalan',     rowId: `${p}ramalan` },
+              { title: '💪 Kata Motivasi', rowId: `${p}kata` },
             ]}
           ]
         }, msg);
-      } catch (e2) {
-        console.error('[menu] List fallback error:', e2.message);
-      }
+      } catch {}
     }
   }
 };
