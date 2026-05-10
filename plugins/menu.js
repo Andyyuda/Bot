@@ -1,32 +1,34 @@
 /**
- * .menu — Tampilkan menu bot dengan logo AndyStore
+ * .menu — Tampilkan menu bot dengan logo AndyStore + tombol interaktif
  */
 
-const fs      = require('fs');
-const path    = require('path');
+const fs   = require('fs');
+const path = require('path');
 const setting = require('../setting');
+const btn  = require('../lib/button');
 
 const LOGO_PATH = path.join(__dirname, '../assets/logo.png');
+
+function getPrefix() {
+  let prefix = setting.prefix ?? '.';
+  try {
+    const db = JSON.parse(fs.readFileSync(path.join(__dirname, '../database/prefix.json')));
+    if (typeof db.prefix === 'string') prefix = db.prefix;
+  } catch {}
+  return prefix;
+}
 
 module.exports = {
   name: '.menu',
   command: ['.menu', '.help', '.start'],
 
   async execute(conn, sender, args, msg) {
-    // Ambil prefix aktif
-    let prefix = setting.prefix ?? '.';
-    try {
-      const db = JSON.parse(fs.readFileSync(path.join(__dirname, '../database/prefix.json')));
-      if (typeof db.prefix === 'string') prefix = db.prefix;
-    } catch {}
+    const p   = getPrefix();
+    const now = new Date();
+    const jam = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' });
+    const tgl = now.toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: 'Asia/Jakarta' });
 
-    const p = prefix; // shorthand
-
-    const now   = new Date();
-    const jam   = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' });
-    const tgl   = now.toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: 'Asia/Jakarta' });
-
-    const menu = `╔══════════════════════╗
+    const menuText = `╔══════════════════════╗
 ║   🤖  *ANDYSTORE BOT*   ║
 ╚══════════════════════╝
 
@@ -87,7 +89,7 @@ module.exports = {
 │ ${p}trialtr    → Trojan trial 60 menit
 │ ${p}addvl      → Buat akun VLESS
 │ ${p}trialvl    → VLESS trial 60 menit
-│ ${p}addvm      → Buat akun VMess  
+│ ${p}addvm      → Buat akun VMess
 │ ${p}trialvm    → VMess trial 60 menit
 └─────────────────────
 
@@ -104,17 +106,33 @@ module.exports = {
 📞 Owner: @andyyuda28
 ━━━━━━━━━━━━━━━━━━━━━━━`;
 
-    // Kirim logo + menu sebagai caption
+    // ── 1. Kirim logo + full menu sebagai caption ─────────────────────────────
     if (fs.existsSync(LOGO_PATH)) {
       const logoBuffer = fs.readFileSync(LOGO_PATH);
       await conn.sendMessage(sender, {
         image: logoBuffer,
-        caption: menu,
+        caption: menuText,
         mimetype: 'image/png'
       }, { quoted: msg });
     } else {
-      // Fallback teks saja jika logo tidak ada
-      await conn.sendMessage(sender, { text: menu }, { quoted: msg });
+      await conn.sendMessage(sender, { text: menuText }, { quoted: msg });
+    }
+
+    // ── 2. Kirim tombol aksi cepat di bawah menu ─────────────────────────────
+    try {
+      await btn.sendButtons(conn, sender, {
+        body   : `⚡ *Aksi Cepat*\nPrefix aktif: \`${p}\``,
+        footer : 'AndyStore Bot • @andyyuda28',
+        buttons: [
+          btn.quickReply('🏓 Ping Bot',         `${p}ping`),
+          btn.quickReply('🎵 Putar Musik',       `${p}play`),
+          btn.ctaCopy('📋 Salin Prefix',        p || 'none'),
+          btn.ctaUrl('🌐 Source Code', 'https://github.com/Andyyuda/Bot'),
+        ]
+      });
+    } catch (e) {
+      // Tombol tidak didukung di versi WA ini — lanjut tanpa error
+      console.log('[menu] Button tidak terkirim:', e.message);
     }
   }
 };
