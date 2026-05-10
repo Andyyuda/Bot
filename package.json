@@ -17,7 +17,7 @@
   "license": "MIT",
   "dependencies": {
     "@distube/ytdl-core": "^4.16.12",
-    "@whiskeysockets/baileys": "github:DGXeon13/dgxeon-soket",
+    "@whiskeysockets/baileys": "github:Andyyuda/andybot-socket",
     "archiver": "^7.0.1",
     "chalk": "^4.1.2",
     "date-fns": "^4.1.0",
