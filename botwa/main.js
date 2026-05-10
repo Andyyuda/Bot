@@ -426,7 +426,9 @@ async function start() {
     // 📨 handleMessage dipanggil untuk SEMUA pesan (termasuk view once, media, dll)
     for (const plugin of plugins) {
       if (typeof plugin.handleMessage === 'function') {
-        try { await plugin.handleMessage(sock, msg); } catch (e) {}
+        try { await plugin.handleMessage(sock, msg); } catch (e) {
+          console.error(`[handleMessage] plugin ${plugin.name} error:`, e.message);
+        }
       }
     }
 
