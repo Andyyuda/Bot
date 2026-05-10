@@ -1,11 +1,11 @@
 /**
- * .menu — Tampilkan menu bot dengan logo AndyStore + list interaktif
+ * .menu — Tampilkan menu bot dengan logo AndyStore + poll interaktif
  */
 
 const fs   = require('fs');
 const path = require('path');
 const setting = require('../setting');
-const btn  = require('../lib/button');
+const { sendPoll } = require('../lib/button');
 
 const LOGO_PATH = path.join(__dirname, '../assets/logo.png');
 
@@ -118,50 +118,17 @@ module.exports = {
       await conn.sendMessage(sender, { text: menuText }, { quoted: msg });
     }
 
-    // ── 2. Kirim list interaktif (PALING kompatibel di personal WA) ───────────
-    try {
-      await btn.sendList(conn, sender, {
-        body    : `⚡ *Aksi Cepat* — prefix: \`${p || 'none'}\`\nPilih perintah di bawah:`,
-        footer  : 'AndyStore Bot • @andyyuda28',
-        title   : '🤖 AndyStore Bot',
-        btnLabel: '📋 Pilih Perintah',
-        sections: [
-          {
-            title: '🔥 Populer',
-            rows : [
-              { title: '🏓 Ping Bot',      rowId: `${p}ping`,    description: 'Cek kecepatan & status bot' },
-              { title: '🎵 Putar Musik',   rowId: `${p}play`,    description: 'Cari & putar lagu dari YouTube' },
-              { title: '📜 Menu Lengkap',  rowId: `${p}menu`,    description: 'Tampilkan menu ini lagi' },
-            ]
-          },
-          {
-            title: '👑 Owner',
-            rows : [
-              { title: '👤 Lihat ID Saya',  rowId: `${p}myid`,      description: 'Tampilkan ID / nomor kamu' },
-              { title: '🔑 Daftar Owner',   rowId: `${p}regowner`,  description: 'Daftar sebagai owner via PIN' },
-              { title: '⚙️ Ganti Prefix',  rowId: `${p}setprefix`, description: 'Ubah prefix perintah bot' },
-            ]
-          },
-          {
-            title: '👥 Grup',
-            rows : [
-              { title: '➕ Add Member',    rowId: `${p}add`,     description: 'Tambah member ke grup' },
-              { title: '🚫 Kick Member',   rowId: `${p}kick`,    description: 'Keluarkan member dari grup' },
-              { title: '🔇 Mute Member',   rowId: `${p}mute`,    description: 'Bisukan member di grup' },
-            ]
-          },
-          {
-            title: '🖥️ Server & VPN',
-            rows : [
-              { title: '🔐 Buat SSH',      rowId: `${p}buatssh`,   description: 'Buat akun SSH baru' },
-              { title: '📡 Registrasi IP', rowId: `${p}regisip`,   description: 'Daftarkan IP VPS ke GitHub' },
-              { title: '🔄 Restart Bot',   rowId: `${p}restart`,   description: 'Restart ulang bot' },
-            ]
-          }
-        ]
-      }, msg);
-    } catch (e) {
-      console.error('[menu] List error:', e.message);
-    }
+    // ── 2. Kirim poll interaktif (PASTI muncul di semua WA) ───────────────────
+    await sendPoll(conn, sender, {
+      question: '⚡ Pilih aksi cepat:',
+      options: [
+        { label: '🏓 Ping Bot',       command: `${p}ping` },
+        { label: '🎵 Putar Musik',    command: `${p}play` },
+        { label: '👤 ID Saya',        command: `${p}myid` },
+        { label: '🖥️ Buat SSH',      command: `${p}buatssh` },
+        { label: '🔄 Restart Bot',    command: `${p}restart` },
+        { label: '📜 Menu Lengkap',   command: `${p}menu` },
+      ]
+    });
   }
 };
