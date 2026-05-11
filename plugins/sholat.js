@@ -111,9 +111,9 @@ function startScheduler(conn) {
   setInterval(async () => {
     const db  = loadDB();
     const now = new Date();
-    const nowStr = now.toLocaleTimeString('id-ID', {
-      hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta', hour12: false
-    });
+    // Konversi ke waktu Jakarta lalu format manual HH:MM agar cocok dengan format API
+    const jakarta = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }));
+    const nowStr = String(jakarta.getHours()).padStart(2, '0') + ':' + String(jakarta.getMinutes()).padStart(2, '0');
 
     for (const [jid, cfg] of Object.entries(db)) {
       if (!cfg.aktif || !cfg.kotaId) continue;
