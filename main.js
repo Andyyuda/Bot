@@ -146,7 +146,7 @@ async function start() {
       keys: makeCacheableSignalKeyStore(state.keys, baileysLogger)
     },
     printQRInTerminal: false,
-    browser: Browsers('Chrome'),
+    browser: Browsers.ubuntu('Chrome'),
     syncFullHistory: false,
     markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false,
