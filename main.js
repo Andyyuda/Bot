@@ -1,3 +1,21 @@
+// ── Patch banner: ganti dgxeon → andybot sebelum library di-require ──────────
+;(function patchBanner() {
+  const orig = console.log.bind(console);
+  const _replace = (s) => typeof s !== 'string' ? s : s
+    .replace(/DGXEON BAILEYS/gi, 'ANDYBOT SOCKET')
+    .replace(/THANK YOU FOR USING DGXEON/gi, 'THANK YOU FOR USING ANDYBOT')
+    .replace(/@dgxeon13/gi, '@andyyuda28')
+    .replace(/dgxeon13/gi, 'Andyyuda')
+    .replace(/dgxeon/gi, 'andybot')
+    .replace(/unicorn_xeon13/gi, 'andyyuda28')
+    .replace(/\+916909137213/g, '+6287819104999')
+    .replace(/YouTube\s*:.*@dgxeon.*/gi, 'WhatsApp : +6287819104999')
+    .replace(/Instagram\s*:.*unicorn.*/gi, '');
+  console.log = (...args) => orig(...args.map(_replace));
+  // Restore setelah 3 detik (banner sudah lewat)
+  setTimeout(() => { console.log = orig; }, 3000);
+})();
+
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -132,6 +150,10 @@ async function start() {
     child: function() { return this; }
   };
 
+  // Cache pesan masuk agar retry request dari WA bisa dipenuhi
+  const msgStore = new Map();
+  const MAX_STORE = 500;
+
   const sock = makeWASocket({
     version,
     logger: baileysLogger,
@@ -143,7 +165,15 @@ async function start() {
     browser: Browsers('Chrome'),
     syncFullHistory: false,
     markOnlineOnConnect: false,
-    generateHighQualityLinkPreview: false
+    generateHighQualityLinkPreview: false,
+    retryRequestDelayMs: 250,
+    maxMsgRetryCount: 5,
+    // Wajib agar "could not send message again" tidak muncul
+    getMessage: async (key) => {
+      const id = key.id;
+      if (msgStore.has(id)) return msgStore.get(id);
+      return { conversation: '' };
+    }
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -226,6 +256,12 @@ async function start() {
       console.log(chalk.cyan(`👤 Bot : ${sock.user?.id}`));
       console.log(chalk.cyan(`📛 Nama: ${sock.user?.name ?? '-'}`));
       if (tg.isConfigured) await tg.sendMessage(info);
+      // Panggil onReady untuk setiap plugin (misal: scheduler sholat)
+      for (const plugin of plugins) {
+        if (typeof plugin.onReady === 'function') {
+          try { plugin.onReady(sock); } catch (e) { console.error('onReady error:', e.message); }
+        }
+      }
     }
 
     // ── Koneksi terputus ─────────────────────────────────────────────
@@ -349,9 +385,55 @@ async function start() {
   });
 
   // 📩 Handler pesan masuk
-  sock.ev.on('messages.upsert', async ({ messages }) => {
+  // 👁️ messages.update — tangkap view once yang datang via update event
+  sock.ev.on('messages.update', async (updates) => {
+    for (const update of updates) {
+      const jid = update.key?.remoteJid;
+      if (!jid || jid === 'status@broadcast') return;
+      console.log(chalk.magenta(`[UPDATE] jid=${jid} id=${update.key?.id} update_keys=${Object.keys(update.update || {}).join(',')}`));
+      for (const plugin of plugins) {
+        if (typeof plugin.handleUpdate === 'function') {
+          try { await plugin.handleUpdate(sock, update); } catch (e) {
+            console.error(`[handleUpdate] ${plugin.name}:`, e.message);
+          }
+        }
+      }
+    }
+  });
+
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
     const msg = messages[0];
+
+    // 👁️ Cek view once "unavailable" — WA kirim stub tanpa konten ke bot
+    if (msg && !msg.message && msg.messageStubParameters?.[1]) {
+      try {
+        const rawNode = JSON.parse(msg.messageStubParameters[1]);
+        const unavail = Array.isArray(rawNode.content)
+          ? rawNode.content.find(c => c.tag === 'unavailable')
+          : null;
+        if (unavail?.attrs?.type === 'view_once' && msg.key.remoteJid !== 'status@broadcast') {
+          for (const plugin of plugins) {
+            if (typeof plugin.handleViewOnce === 'function') {
+              try { await plugin.handleViewOnce(sock, msg, rawNode); } catch (e) {
+                console.error(`[handleViewOnce] ${plugin.name}:`, e.message);
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
     if (!msg?.message || msg.key.remoteJid === 'status@broadcast') return;
+
+    // Simpan ke msgStore untuk retry WA
+    if (msg.key.id && msg.message) {
+      msgStore.set(msg.key.id, msg.message);
+      if (msgStore.size > MAX_STORE) {
+        const oldest = msgStore.keys().next().value;
+        msgStore.delete(oldest);
+      }
+    }
+
     if (msg.key.fromMe) return;
 
     const remoteJid = msg.key.remoteJid;
@@ -377,6 +459,15 @@ async function start() {
       } catch (e) {}
     }
 
+    // 📨 handleMessage dipanggil untuk SEMUA pesan (termasuk view once, media, dll)
+    for (const plugin of plugins) {
+      if (typeof plugin.handleMessage === 'function') {
+        try { await plugin.handleMessage(sock, msg); } catch (e) {
+          console.error(`[handleMessage] plugin ${plugin.name} error:`, e.message);
+        }
+      }
+    }
+
     if (!text) return;
     console.log(chalk.blue(`[IN] ${senderJid} -> ${remoteJid}: ${text}`));
 
@@ -395,13 +486,6 @@ async function start() {
       (mode === 'group' && !isGroupMsg) ||
       (mode === 'owner' && !ownerCheck)
     ) return;
-
-    // 🔇 Mute handler
-    for (const plugin of plugins) {
-      if (typeof plugin.handleMessage === 'function') {
-        try { await plugin.handleMessage(sock, msg); } catch (e) {}
-      }
-    }
 
     // 🔒 Cek & hapus pesan jika user dimute (hanya di grup)
     if (isGroupMsg && msg.key.participant) {
