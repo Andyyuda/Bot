@@ -1,5 +1,6 @@
 /**
  * .sholat — Notifikasi sholat 5 waktu otomatis + jadwal harian
+ * API: MyQuran (api.myquran.com) — gratis, tanpa key
  * Perintah:
  *   .sholat setup <kota>  — Set kota & aktifkan notif (owner)
  *   .sholat on / off      — Toggle notifikasi (owner)
@@ -16,23 +17,21 @@ const setting = require('../setting');
 
 const DB_PATH = path.join(__dirname, '../database/sholat.json');
 
-const WAKTU  = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
-const NAMA   = { Fajr: 'Subuh', Dhuhr: 'Dzuhur', Asr: 'Ashar', Maghrib: 'Maghrib', Isha: 'Isya' };
-const EMOJI  = { Fajr: '🌙', Dhuhr: '☀️', Asr: '🌤️', Maghrib: '🌅', Isha: '✨' };
+const WAKTU = ['Subuh', 'Dzuhur', 'Ashar', 'Maghrib', 'Isya'];
+const EMOJI = { Subuh: '🌙', Dzuhur: '☀️', Ashar: '🌤️', Maghrib: '🌅', Isya: '✨' };
+// mapping nama MyQuran ke key WAKTU
+const KEY_MAP = { Subuh: 'subuh', Dzuhur: 'dzuhur', Ashar: 'ashar', Maghrib: 'maghrib', Isya: 'isya' };
 
-// Gambar masjid (Wikipedia Commons — stabil)
-const IMG_URL  = 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Faisal_Mosque_Islamabad.jpg/1280px-Faisal_Mosque_Islamabad.jpg';
-
-// Adzan audio (coba beberapa URL, pakai yang pertama berhasil)
+const IMG_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Faisal_Mosque_Islamabad.jpg/1280px-Faisal_Mosque_Islamabad.jpg';
 const ADZAN_URLS = [
   'https://www.islamcan.com/audio/adhan/azan1.mp3',
   'https://ia800500.us.archive.org/18/items/MadinaNobisAzaan/Madina%20Nobis%20Azaan.mp3',
 ];
 
 let schedulerStarted = false;
-let connRef           = null;
+let connRef = null;
 
-// ── DB helpers ──────────────────────────────────────────────────────────────
+// ── DB helpers ───────────────────────────────────────────────────────────────
 function loadDB() {
   try { return JSON.parse(fs.readFileSync(DB_PATH, 'utf8')); } catch { return {}; }
 }
@@ -41,52 +40,61 @@ function saveDB(data) {
   fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
 }
 
-// ── Ambil jadwal dari Aladhan API ────────────────────────────────────────────
-async function getJadwal(kota, negara = 'Indonesia') {
-  const url = `https://api.aladhan.com/v1/timingsByCity?city=${encodeURIComponent(kota)}&country=${encodeURIComponent(negara)}&method=11`;
+// ── Cari kota di MyQuran → {id, lokasi} ─────────────────────────────────────
+async function cariKota(keyword) {
+  const url = `https://api.myquran.com/v2/sholat/kota/cari/${encodeURIComponent(keyword)}`;
   const res  = await fetch(url, { timeout: 10000 });
   const json = await res.json();
-  if (json.code !== 200) throw new Error(`Kota "${kota}" tidak ditemukan`);
-  return json.data;
+  if (!json.status || !json.data?.length) throw new Error(`Kota "${keyword}" tidak ditemukan`);
+  return json.data[0]; // {id, lokasi}
+}
+
+// ── Ambil jadwal dari MyQuran berdasarkan ID kota ────────────────────────────
+async function getJadwal(kotaId) {
+  const now  = new Date();
+  const y    = now.getFullYear();
+  const m    = String(now.getMonth() + 1).padStart(2, '0');
+  const d    = String(now.getDate()).padStart(2, '0');
+  const url  = `https://api.myquran.com/v2/sholat/jadwal/${kotaId}/${y}/${m}/${d}`;
+  const res  = await fetch(url, { timeout: 10000 });
+  const json = await res.json();
+  if (!json.status) throw new Error('Gagal ambil jadwal sholat');
+  return json.data; // {id, lokasi, daerah, jadwal:{tanggal,subuh,dzuhur,...}}
+}
+
+// ── Format jadwal jadi string ────────────────────────────────────────────────
+function formatJadwal(jadwal, highlight = null) {
+  return WAKTU.map(w => {
+    const mark = w === highlight ? '▶️' : '   ';
+    const jam  = jadwal[KEY_MAP[w]] || '-';
+    return `${mark} ${EMOJI[w]} *${w}*\t: ${jam}`;
+  }).join('\n');
 }
 
 // ── Kirim notifikasi waktu sholat ────────────────────────────────────────────
-async function kirimNotif(conn, jid, waktu, kota, timings, tanggal) {
-  const nama  = NAMA[waktu];
-  const emoji = EMOJI[waktu];
-  const jam   = timings[waktu]?.substring(0, 5);
+async function kirimNotif(conn, jid, waktu, lokasi, jadwal) {
+  const jam  = jadwal[KEY_MAP[waktu]] || '-';
 
-  const jadwalStr = WAKTU.map(w => {
-    const mark = w === waktu ? '▶️' : '   ';
-    return `${mark} ${EMOJI[w]} *${NAMA[w]}*\t: ${timings[w]?.substring(0, 5)}`;
-  }).join('\n');
-
-  const teks = `${emoji} *WAKTU ${nama.toUpperCase()} TELAH TIBA* ${emoji}\n\n` +
-    `📍 Kota  : *${kota}*\n` +
+  const teks = `${EMOJI[waktu]} *WAKTU ${waktu.toUpperCase()} TELAH TIBA* ${EMOJI[waktu]}\n\n` +
+    `📍 Kota  : *${lokasi}*\n` +
     `🕐 Pukul : *${jam} WIB*\n` +
-    `📅 Tanggal: ${tanggal}\n\n` +
+    `📅 Tanggal: ${jadwal.tanggal}\n\n` +
     `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-    `📅 *Jadwal Sholat Hari Ini*\n\n${jadwalStr}\n` +
+    `📅 *Jadwal Sholat Hari Ini*\n\n${formatJadwal(jadwal, waktu)}\n` +
     `━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
     `🤲 _Segera tunaikan sholat, jangan ditunda._\n` +
     `✨ _"Sholat adalah tiang agama."_`;
 
-  // Kirim gambar + caption
   try {
     await conn.sendMessage(jid, { image: { url: IMG_URL }, caption: teks });
   } catch {
     await conn.sendMessage(jid, { text: teks });
   }
 
-  // Kirim audio adzan
   for (const url of ADZAN_URLS) {
     try {
-      await conn.sendMessage(jid, {
-        audio   : { url },
-        mimetype: 'audio/mpeg',
-        ptt     : false
-      });
-      break; // berhasil, stop coba URL berikutnya
+      await conn.sendMessage(jid, { audio: { url }, mimetype: 'audio/mpeg', ptt: false });
+      break;
     } catch (e) {
       console.error(`[sholat] audio gagal (${url}):`, e.message);
     }
@@ -98,7 +106,6 @@ function startScheduler(conn) {
   connRef = conn;
   if (schedulerStarted) return;
   schedulerStarted = true;
-
   console.log('[sholat] Scheduler dimulai ✅');
 
   setInterval(async () => {
@@ -106,26 +113,25 @@ function startScheduler(conn) {
     const now = new Date();
     const nowStr = now.toLocaleTimeString('id-ID', {
       hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta', hour12: false
-    }); // "05:12"
+    });
 
     for (const [jid, cfg] of Object.entries(db)) {
-      if (!cfg.aktif || !cfg.kota) continue;
+      if (!cfg.aktif || !cfg.kotaId) continue;
       try {
-        const data     = await getJadwal(cfg.kota, cfg.negara || 'Indonesia');
-        const timings  = data.timings;
-        const tanggal  = data.date.readable;
+        const data   = await getJadwal(cfg.kotaId);
+        const jadwal = data.jadwal;
         for (const w of WAKTU) {
-          const t = timings[w]?.substring(0, 5);
+          const t = (jadwal[KEY_MAP[w]] || '').substring(0, 5);
           if (t === nowStr) {
             console.log(`[sholat] 🕌 ${w} (${t}) → ${jid}`);
-            await kirimNotif(connRef, jid, w, cfg.kota, timings, tanggal);
+            await kirimNotif(connRef, jid, w, data.lokasi, jadwal);
           }
         }
       } catch (e) {
         console.error(`[sholat] scheduler error untuk ${jid}:`, e.message);
       }
     }
-  }, 60_000); // setiap 1 menit
+  }, 60_000);
 }
 
 // ── Plugin export ────────────────────────────────────────────────────────────
@@ -144,10 +150,9 @@ module.exports = {
     const cfg        = db[sender] || {};
     const sub        = (args[0] || '').toLowerCase().trim();
 
-    // ── Help / info jadwal ───────────────────────────────────────────────────
+    // ── Info / jadwal hari ini ───────────────────────────────────────────────
     if (!sub || sub === 'info' || sub === 'jadwal') {
-      const kota = cfg.kota;
-      if (!kota) {
+      if (!cfg.kotaId) {
         return conn.sendMessage(sender, {
           text: `🕌 *NOTIFIKASI SHOLAT*\n\nBelum ada kota yang di-set!\n\n` +
                 `Gunakan: _.sholat setup <kota>_\nContoh: _.sholat setup Jakarta_\n\n` +
@@ -158,22 +163,16 @@ module.exports = {
                 `• _.sholat hapus_ — Hapus pengaturan`
         }, { quoted: msg });
       }
-
       try {
-        const data     = await getJadwal(kota, cfg.negara || 'Indonesia');
-        const timings  = data.timings;
-        const tanggal  = data.date.readable;
+        const data     = await getJadwal(cfg.kotaId);
+        const jadwal   = data.jadwal;
         const status   = cfg.aktif ? '✅ Aktif' : '❌ Nonaktif';
 
-        const jadwalStr = WAKTU.map(w =>
-          `${EMOJI[w]} *${NAMA[w]}*\t: ${timings[w]?.substring(0, 5)}`
-        ).join('\n');
-
         const teks = `🕌 *JADWAL SHOLAT HARI INI*\n\n` +
-          `📍 Kota    : *${kota}*\n` +
-          `📅 Tanggal : ${tanggal}\n` +
+          `📍 Kota    : *${data.lokasi}*\n` +
+          `📅 Tanggal : ${jadwal.tanggal}\n` +
           `🔔 Notifikasi: ${status}\n\n` +
-          `━━━━━━━━━━━━━━━━━━━━━━━━\n${jadwalStr}\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━\n${formatJadwal(jadwal)}\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
           `🤲 _Jangan lewatkan waktu sholat!_`;
 
         try {
@@ -199,26 +198,23 @@ module.exports = {
         }, { quoted: msg });
       }
       try {
-        const data    = await getJadwal(kota);
-        const timings = data.timings;
-        const tanggal = data.date.readable;
+        const found  = await cariKota(kota);
+        const data   = await getJadwal(found.id);
+        const jadwal = data.jadwal;
 
-        db[sender] = { kota, negara: 'Indonesia', aktif: true };
+        db[sender] = { kotaId: found.id, lokasi: data.lokasi, aktif: true };
         saveDB(db);
         startScheduler(conn);
 
-        const jadwalStr = WAKTU.map(w =>
-          `${EMOJI[w]} *${NAMA[w]}*: ${timings[w]?.substring(0, 5)}`
-        ).join('\n');
-
         await conn.sendMessage(sender, {
           text: `✅ *Notifikasi sholat berhasil di-setup!*\n\n` +
-                `📍 Kota: *${kota}*\n📅 ${tanggal}\n\n${jadwalStr}\n\n` +
+                `📍 Kota: *${data.lokasi}*\n📅 ${jadwal.tanggal}\n\n` +
+                `${formatJadwal(jadwal)}\n\n` +
                 `🔔 Bot akan otomatis kirim notifikasi + adzan setiap waktu sholat!`
         }, { quoted: msg });
       } catch (e) {
         await conn.sendMessage(sender, {
-          text: `❌ Kota tidak ditemukan: _${kota}_\n\nCoba dalam bahasa Inggris:\n• _.sholat setup Surabaya_\n• _.sholat setup Bandung_`
+          text: `❌ Kota tidak ditemukan: _${kota}_\n\nCoba nama kota lain:\n• _.sholat setup Surabaya_\n• _.sholat setup Bandung_\n• _.sholat setup Medan_`
         }, { quoted: msg });
       }
       return;
@@ -227,12 +223,12 @@ module.exports = {
     // ── On ───────────────────────────────────────────────────────────────────
     if (sub === 'on') {
       if (!ownerCheck) return conn.sendMessage(sender, { text: '⛔ Hanya owner.' }, { quoted: msg });
-      if (!cfg.kota) return conn.sendMessage(sender, { text: '❌ Setup dulu: _.sholat setup <kota>_' }, { quoted: msg });
+      if (!cfg.kotaId) return conn.sendMessage(sender, { text: '❌ Setup dulu: _.sholat setup <kota>_' }, { quoted: msg });
       db[sender] = { ...cfg, aktif: true };
       saveDB(db);
       startScheduler(conn);
       return conn.sendMessage(sender, {
-        text: `✅ Notifikasi sholat *diaktifkan!*\n📍 Kota: *${cfg.kota}*`
+        text: `✅ Notifikasi sholat *diaktifkan!*\n📍 Kota: *${cfg.lokasi || cfg.kotaId}*`
       }, { quoted: msg });
     }
 
@@ -255,7 +251,7 @@ module.exports = {
     // ── Default help ─────────────────────────────────────────────────────────
     await conn.sendMessage(sender, {
       text: `🕌 *NOTIFIKASI SHOLAT 5 WAKTU*\n\n` +
-            `📖 Perintah (prefix = owner only):\n` +
+            `📖 Perintah:\n` +
             `• _.sholat setup <kota>_ — Setup kota & aktifkan notif\n` +
             `• _.sholat on_ — Aktifkan notifikasi\n` +
             `• _.sholat off_ — Matikan notifikasi\n` +
