@@ -1,6 +1,6 @@
 /**
  * .quiz — Kuis trivia bahasa Indonesia
- * .jawab <huruf> — jawab kuis
+ * Setelah mulai, langsung ketik A/B/C/D (tanpa prefix)
  */
 
 const SOAL = [
@@ -27,18 +27,21 @@ const SOAL = [
 ];
 
 const HURUF = ['A', 'B', 'C', 'D'];
-if (!global.quizSesi) global.quizSesi = new Map(); // jid → { soal, jawaban, skor, total }
+if (!global.quizSesi) global.quizSesi = new Map();
+
+function soalAcak() { return SOAL[Math.floor(Math.random() * SOAL.length)]; }
+function formatSoal(soal) {
+  return soal.o.map((o, i) => `${HURUF[i]}. ${o}`).join('\n');
+}
 
 module.exports = {
   name: '.quiz',
-  command: ['.quiz', '.jawab', '.quizstop'],
+  command: ['.quiz', '.quizstop'],
 
   async execute(conn, sender, args, msg) {
-    const jid    = msg.key.remoteJid;
-    const senderJid = msg.key.participant || msg.key.remoteJid;
-    const cmd    = (msg.message?.conversation || msg.message?.extendedTextMessage?.text || '').trim().split(' ')[0].toLowerCase();
+    const jid = msg.key.remoteJid;
+    const cmd = (msg.message?.conversation || msg.message?.extendedTextMessage?.text || '').trim().split(' ')[0].toLowerCase();
 
-    // Stop quiz
     if (cmd === '.quizstop') {
       if (global.quizSesi.has(jid)) {
         const s = global.quizSesi.get(jid);
@@ -50,50 +53,43 @@ module.exports = {
       return conn.sendMessage(sender, { text: 'Tidak ada quiz aktif.' }, { quoted: msg });
     }
 
-    // Jawab
-    if (cmd === '.jawab') {
-      const sesi = global.quizSesi.get(jid);
-      if (!sesi) {
-        return conn.sendMessage(sender, {
-          text: `❌ Belum ada quiz!\nMulai dengan *.quiz*`
-        }, { quoted: msg });
-      }
-
-      const jawabanUser = (args[0] || '').toUpperCase();
-      if (!HURUF.includes(jawabanUser)) {
-        return conn.sendMessage(sender, {
-          text: `⚠️ Ketik *.jawab A/B/C/D*`
-        }, { quoted: msg });
-      }
-
-      const idxJawaban = HURUF.indexOf(jawabanUser);
-      const benar = idxJawaban === sesi.soal.j;
-      sesi.total++;
-      if (benar) sesi.skor++;
-
-      const jawabBenar = `${HURUF[sesi.soal.j]}. ${sesi.soal.o[sesi.soal.j]}`;
-      let reply = benar
-        ? `✅ *BENAR!*\n\nJawaban: *${jawabBenar}*\n⭐ Skor: ${sesi.skor}/${sesi.total}`
-        : `❌ *SALAH!*\n\nJawaban yang benar: *${jawabBenar}*\n📊 Skor: ${sesi.skor}/${sesi.total}`;
-
-      // Soal berikutnya
-      const soalBerikutnya = SOAL[Math.floor(Math.random() * SOAL.length)];
-      sesi.soal = soalBerikutnya;
-      global.quizSesi.set(jid, sesi);
-
-      const opsiStr = soalBerikutnya.o.map((o, i) => `${HURUF[i]}. ${o}`).join('\n');
-      reply += `\n\n━━━━━━━━━━━━━━\n📚 *Soal Berikutnya:*\n\n${soalBerikutnya.q}\n\n${opsiStr}\n\n_Jawab: .jawab A/B/C/D_\n_Berhenti: .quizstop_`;
-
-      return conn.sendMessage(sender, { text: reply }, { quoted: msg });
-    }
-
-    // Mulai quiz baru
-    const soal = SOAL[Math.floor(Math.random() * SOAL.length)];
+    const soal = soalAcak();
     global.quizSesi.set(jid, { soal, skor: 0, total: 0 });
 
-    const opsiStr = soal.o.map((o, i) => `${HURUF[i]}. ${o}`).join('\n');
     await conn.sendMessage(sender, {
-      text: `🧠 *QUIZ TRIVIA*\n\n📚 *Pertanyaan:*\n${soal.q}\n\n${opsiStr}\n\n_Jawab: .jawab A/B/C/D_\n_Berhenti: .quizstop_`
+      text: `🧠 *QUIZ TRIVIA*\n\n📚 *Pertanyaan:*\n${soal.q}\n\n${formatSoal(soal)}\n\n💬 Langsung ketik *A*, *B*, *C*, atau *D*!\nBerhenti: _.quizstop_`
     }, { quoted: msg });
+  },
+
+  async handleMessage(conn, msg) {
+    const jid = msg.key.remoteJid;
+    if (!global.quizSesi?.has(jid)) return;
+    if (msg.key.fromMe) return;
+
+    const text = (
+      msg.message?.conversation ||
+      msg.message?.extendedTextMessage?.text || ''
+    ).trim().toUpperCase();
+
+    if (!HURUF.includes(text)) return;
+
+    const sesi = global.quizSesi.get(jid);
+    const idxJawaban = HURUF.indexOf(text);
+    const benar = idxJawaban === sesi.soal.j;
+    sesi.total++;
+    if (benar) sesi.skor++;
+
+    const jawabBenar = `${HURUF[sesi.soal.j]}. ${sesi.soal.o[sesi.soal.j]}`;
+    let reply = benar
+      ? `✅ *BENAR!*\n\nJawaban: *${jawabBenar}*\n⭐ Skor: ${sesi.skor}/${sesi.total}`
+      : `❌ *SALAH!*\n\nJawaban yang benar: *${jawabBenar}*\n📊 Skor: ${sesi.skor}/${sesi.total}`;
+
+    const soalBerikutnya = soalAcak();
+    sesi.soal = soalBerikutnya;
+    global.quizSesi.set(jid, sesi);
+
+    reply += `\n\n━━━━━━━━━━━━━━\n📚 *Soal Berikutnya:*\n\n${soalBerikutnya.q}\n\n${formatSoal(soalBerikutnya)}\n\n💬 Ketik *A*, *B*, *C*, atau *D*\nBerhenti: _.quizstop_`;
+
+    return conn.sendMessage(jid, { text: reply }, { quoted: msg });
   }
 };
