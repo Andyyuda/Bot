@@ -1,21 +1,3 @@
-// ── Patch banner: ganti dgxeon → andybot sebelum library di-require ──────────
-;(function patchBanner() {
-  const orig = console.log.bind(console);
-  const _replace = (s) => typeof s !== 'string' ? s : s
-    .replace(/DGXEON BAILEYS/gi, 'ANDYBOT SOCKET')
-    .replace(/THANK YOU FOR USING DGXEON/gi, 'THANK YOU FOR USING ANDYBOT')
-    .replace(/@dgxeon13/gi, '@andyyuda28')
-    .replace(/dgxeon13/gi, 'Andyyuda')
-    .replace(/dgxeon/gi, 'andybot')
-    .replace(/unicorn_xeon13/gi, 'andyyuda28')
-    .replace(/\+916909137213/g, '+6287819104999')
-    .replace(/YouTube\s*:.*@dgxeon.*/gi, 'WhatsApp : +6287819104999')
-    .replace(/Instagram\s*:.*unicorn.*/gi, '');
-  console.log = (...args) => orig(...args.map(_replace));
-  // Restore setelah 3 detik (banner sudah lewat)
-  setTimeout(() => { console.log = orig; }, 3000);
-})();
-
 const {
   default: makeWASocket,
   useMultiFileAuthState,
