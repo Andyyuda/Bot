@@ -84,15 +84,16 @@ async function start() {
       console.log(chalk.cyan('📲 Bot belum terdaftar. Mengirim pilihan login ke Telegram...'));
       await tg.sendMessage(
         '🤖 <b>BotWA siap login!</b>\n\n' +
-        '📷 Default: <b>QR Code</b> — QR akan dikirim otomatis.\n\n' +
-        '💡 Atau ketik <b>pairing</b> jika ingin login dengan Pairing Code.'
+        'Pilih mode login:\n' +
+        '1️⃣ <b>QR Code</b> — scan QR dari WhatsApp\n' +
+        '2️⃣ <b>Pairing Code</b> — masukkan kode di Linked Devices\n\n' +
+        'Balas <b>1</b> untuk QR atau <b>2</b> untuk Pairing Code'
       );
 
-      // Tunggu sebentar untuk cek apakah user mau pairing, jika tidak langsung QR
-      const input = await tg.waitReply(30000);
-      const inputBersih = (input || '').trim().toLowerCase();
+      const input = await tg.waitReply(120000);
+      const inputBersih = (input || '').trim();
 
-      if (inputBersih === 'pairing') {
+      if (inputBersih === '2' || inputBersih.toLowerCase() === 'pairing') {
         modeLogin = 'pairing';
         await tg.sendMessage('📱 Masukkan nomor HP:\n<code>628xxxxxxxxxx</code>\n(tanpa + atau spasi)');
         const nomInput = await tg.waitReply(120000);
@@ -112,12 +113,13 @@ async function start() {
       console.log(chalk.bgCyan.black('\n╔══════════════════════════════════╗'));
       console.log(chalk.bgCyan.black('   🤖  BOTWA — LOGIN WHATSAPP BOT   '));
       console.log(chalk.bgCyan.black('╚══════════════════════════════════╝\n'));
-      console.log(chalk.white('  [Enter] QR Code    ') + chalk.gray('(scan dari terminal)'));
-      console.log(chalk.white('  [p]     Pairing Code') + chalk.gray('(masukkan kode di WA → Linked Devices)\n'));
+      console.log(chalk.white('  [1] QR Code    ') + chalk.gray('(scan QR dari WhatsApp)'));
+      console.log(chalk.white('  [2] Pairing Code') + chalk.gray('(masukkan kode di WA → Linked Devices)\n'));
 
-      const input = await tanyaInput(chalk.cyan('Tekan Enter untuk QR, atau ketik "p" untuk Pairing Code: '));
+      const input = await tanyaInput(chalk.cyan('Pilih mode login (1/2): '));
+      const pil = input.trim();
 
-      if (input.trim().toLowerCase() === 'p' || input.trim().toLowerCase() === 'pairing') {
+      if (pil === '2' || pil.toLowerCase() === 'p' || pil.toLowerCase() === 'pairing') {
         modeLogin = 'pairing';
         nomorTarget = (await tanyaInput(chalk.cyan('📱 Masukkan nomor HP (contoh: 628xxxxxxxxxx): ')))
           .replace(/[^0-9]/g, '');
