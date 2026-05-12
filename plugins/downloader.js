@@ -1,7 +1,7 @@
 const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 🔧 Deteksi platform dari URL
+  // 🔧 Utility
   // ─────────────────────────────────────────────────────────────────────────────
   function detectPlatform(url) {
     if (/youtube\.com|youtu\.be/.test(url)) return 'youtube';
@@ -15,73 +15,96 @@ const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...ar
     return match ? match[0] : null;
   }
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // 📥 YouTube — scraping savefrom.net
-  // ─────────────────────────────────────────────────────────────────────────────
-  async function downloadYouTube(url, mode = 'video') {
-    // savefrom.net internal API
-    const params = new URLSearchParams({
-      sf_url : url,
-      new_web: '1',
-      lang   : 'id'
-    });
+  function getVideoId(url) {
+    const m = url.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([^&?\s/]+)/);
+    return m ? m[1] : null;
+  }
 
-    const res = await fetch('https://worker.sf-tools.com/savefrom.php', {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 📥 YouTube — y2mate.com (analyze → convert)
+  // ─────────────────────────────────────────────────────────────────────────────
+  async function ytAnalyze(url) {
+    const res = await fetch('https://www.y2mate.com/mates/id153/analyze/ajax', {
       method : 'POST',
       headers: {
-        'Content-Type'   : 'application/x-www-form-urlencoded',
-        'User-Agent'     : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
-        'Referer'        : 'https://id.savefrom.net/',
-        'Origin'         : 'https://id.savefrom.net',
-        'Accept'         : 'application/json, text/javascript, */*',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'User-Agent'  : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+        'Referer'     : 'https://www.y2mate.com/',
+        'Origin'      : 'https://www.y2mate.com',
+        'X-Requested-With': 'XMLHttpRequest'
       },
-      body   : params.toString(),
+      body   : 'k_query=' + encodeURIComponent(url) + '&k_page=home&hl=id&q_auto=0',
       timeout: 20000
     });
+    if (!res.ok) throw new Error('y2mate analyze error: ' + res.status);
+    return res.json();
+  }
 
-    if (!res.ok) throw new Error('savefrom.net error: ' + res.status);
-    const data = await res.json();
+  async function ytConvert(videoId, key, ftype, fquality) {
+    const res = await fetch('https://www.y2mate.com/mates/id153/convert', {
+      method : 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'User-Agent'  : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+        'Referer'     : 'https://www.y2mate.com/',
+        'Origin'      : 'https://www.y2mate.com',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body   : 'type=youtube&_id=' + videoId + '&v_id=' + videoId + '&ajax=1&token=' + encodeURIComponent(key) + '&ftype=' + ftype + '&fquality=' + fquality,
+      timeout: 30000
+    });
+    if (!res.ok) throw new Error('y2mate convert error: ' + res.status);
+    return res.json();
+  }
 
-    if (!data || data.err) throw new Error(data.err || 'Gagal ambil data dari savefrom');
+  async function downloadYouTube(url, mode = 'video') {
+    const videoId = getVideoId(url);
+    if (!videoId) throw new Error('URL YouTube tidak valid');
 
-    const title  = data.meta?.title || 'YouTube Video';
-    const thumb  = data.meta?.thumb || '';
-    const dur    = data.meta?.duration || '';
+    // Step 1: Analyze
+    const analyze = await ytAnalyze(url);
+    if (!analyze?.vid) throw new Error('Gagal menganalisis video YouTube');
 
-    // Pisahkan link audio dan video
-    const links = Array.isArray(data.url) ? data.url : [];
+    const title = analyze.title || 'YouTube Video';
 
     if (mode === 'audio') {
-      // Cari format mp3/audio
-      const audio = links.find(l => l.meta?.q === 'mp3' || (l.ext === 'mp3') || (l.meta?.q?.includes('audio')));
-      if (!audio) throw new Error('Format audio (MP3) tidak tersedia untuk video ini');
-      return { title, thumb, dur, downloadUrl: audio.url.replace(/\\/g, ''), ext: 'mp3' };
+      // Cari format mp3
+      const mp3Links = analyze?.links?.mp3;
+      if (!mp3Links) throw new Error('Format audio tidak tersedia');
+
+      // Ambil kualitas tertinggi yang ada
+      const q = Object.keys(mp3Links).find(k => mp3Links[k]?.f === 'mp3') || Object.keys(mp3Links)[0];
+      const item = mp3Links[q];
+      if (!item?.k) throw new Error('Token convert tidak ditemukan');
+
+      const convert = await ytConvert(analyze.vid, item.k, 'mp3', q);
+      if (!convert?.dlink) throw new Error('Link download audio tidak tersedia');
+
+      return { title, downloadUrl: convert.dlink, ext: 'mp3' };
     }
 
-    // Prioritas kualitas video: 720p → 480p → 360p → yang ada
-    const prioritas = ['720p', '480p', '360p', '240p', '144p'];
+    // Mode video — prioritas kualitas
+    const mp4Links = analyze?.links?.mp4;
+    if (!mp4Links) throw new Error('Format video tidak tersedia');
+
+    const prioritas = ['720', '480', '360', '240', '144'];
     let chosen = null;
+    let chosenQ = null;
 
     for (const q of prioritas) {
-      chosen = links.find(l =>
-        (l.meta?.q === q || l.meta?.q?.includes(q.replace('p', ''))) &&
-        (l.ext === 'mp4' || !l.ext)
-      );
-      if (chosen) break;
+      if (mp4Links[q]) { chosen = mp4Links[q]; chosenQ = q + 'p'; break; }
     }
+    if (!chosen) {
+      const firstKey = Object.keys(mp4Links)[0];
+      chosen = mp4Links[firstKey];
+      chosenQ = firstKey + 'p';
+    }
+    if (!chosen?.k) throw new Error('Token convert tidak ditemukan');
 
-    if (!chosen) chosen = links.find(l => l.ext === 'mp4' || !l.ext);
-    if (!chosen) throw new Error('Format video tidak tersedia');
+    const convert = await ytConvert(analyze.vid, chosen.k, 'mp4', chosenQ.replace('p',''));
+    if (!convert?.dlink) throw new Error('Link download video tidak tersedia');
 
-    const quality = chosen.meta?.q || '?';
-    return {
-      title,
-      thumb,
-      dur,
-      quality,
-      downloadUrl: chosen.url.replace(/\\/g, ''),
-      ext        : chosen.ext || 'mp4'
-    };
+    return { title, quality: chosenQ, downloadUrl: convert.dlink, ext: 'mp4' };
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -94,7 +117,6 @@ const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...ar
       body   : 'url=' + encodeURIComponent(url) + '&hd=1',
       timeout: 20000
     });
-
     if (!res.ok) throw new Error('TikWM error: ' + res.status);
     const data = await res.json();
     if (data.code !== 0) throw new Error(data.msg || 'Gagal ambil data TikTok');
@@ -111,47 +133,29 @@ const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...ar
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 📥 Instagram — pakai savefrom juga
+  // 📥 Instagram — cobalt.tools
   // ─────────────────────────────────────────────────────────────────────────────
   async function downloadInstagram(url) {
-    const params = new URLSearchParams({ sf_url: url, new_web: '1', lang: 'id' });
-
-    const res = await fetch('https://worker.sf-tools.com/savefrom.php', {
+    const res = await fetch('https://api.cobalt.tools/', {
       method : 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent'  : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
-        'Referer'     : 'https://id.savefrom.net/',
-        'Origin'      : 'https://id.savefrom.net'
-      },
-      body   : params.toString(),
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body   : JSON.stringify({ url, downloadMode: 'auto' }),
       timeout: 20000
     });
-
-    if (!res.ok) throw new Error('savefrom.net error: ' + res.status);
+    if (!res.ok) throw new Error('Cobalt error: ' + res.status);
     const data = await res.json();
-    if (!data || data.err) throw new Error(data.err || 'Gagal ambil data Instagram');
-
-    const links = Array.isArray(data.url) ? data.url : [];
-    const video = links.find(l => l.ext === 'mp4' || l.type?.includes('video')) || links[0];
-    if (!video) throw new Error('Video tidak ditemukan');
-
-    return {
-      title      : data.meta?.title || 'Instagram Video',
-      downloadUrl: video.url.replace(/\\/g, '')
-    };
+    if (data.status === 'error') throw new Error(data.error?.code || 'Gagal download IG');
+    if (!data.url) throw new Error('URL tidak ditemukan');
+    return { title: 'Instagram Video', downloadUrl: data.url };
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 🔄 Download buffer dari URL
+  // 🔄 Download buffer
   // ─────────────────────────────────────────────────────────────────────────────
   async function getBuffer(url) {
     const res = await fetch(url, {
-      timeout: 90000,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
-        'Referer'   : 'https://id.savefrom.net/'
-      }
+      timeout: 120000,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36' }
     });
     if (!res.ok) throw new Error('Gagal download file: ' + res.status);
 
@@ -184,7 +188,6 @@ const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...ar
       const cmd     = text.trim().split(' ')[0].toLowerCase();
       const rawArgs = args.join(' ').trim();
 
-      // Ambil URL dari args atau dari pesan yang di-reply
       let url = extractUrl(rawArgs);
       if (!url && msg.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
         const q =
@@ -208,14 +211,13 @@ const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...ar
         }, { quoted: msg });
       }
 
-      // Tentukan platform & mode
       let platform = detectPlatform(url);
       let mode     = 'video';
 
-      if (cmd === '.ytmp3')              { platform = 'youtube';   mode = 'audio'; }
-      if (cmd === '.ytmp4' || cmd === '.yt') { platform = 'youtube'; }
+      if (cmd === '.ytmp3')                   { platform = 'youtube';   mode = 'audio'; }
+      if (cmd === '.ytmp4' || cmd === '.yt')  { platform = 'youtube'; }
       if (cmd === '.tt' || cmd === '.tiktok') { platform = 'tiktok'; }
-      if (cmd === '.ig')                 { platform = 'instagram'; }
+      if (cmd === '.ig')                      { platform = 'instagram'; }
 
       if (!platform) {
         return await sock.sendMessage(sender, {
@@ -232,7 +234,6 @@ const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...ar
       await sock.sendMessage(sender, { text: loadingText }, { quoted: msg });
 
       try {
-        // ── YouTube ────────────────────────────────────────────────────────────
         if (platform === 'youtube') {
           const info = await downloadYouTube(url, mode);
           const { buffer } = await getBuffer(info.downloadUrl);
@@ -249,15 +250,13 @@ const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...ar
               video  : buffer,
               caption:
                 '🎬 *' + info.title + '*\n' +
-                '📺 Kualitas: ' + (info.quality || '?') + '\n' +
-                '⏱️ Durasi: ' + (info.dur || '-') + '\n\n' +
-                '📥 via savefrom.net'
+                '📺 Kualitas: ' + (info.quality || '?') + '\n\n' +
+                '📥 via y2mate'
             }, { quoted: msg });
           }
           return;
         }
 
-        // ── TikTok ─────────────────────────────────────────────────────────────
         if (platform === 'tiktok') {
           const info = await downloadTikTok(url);
           const { buffer } = await getBuffer(info.downloadUrl);
@@ -274,14 +273,13 @@ const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...ar
           return;
         }
 
-        // ── Instagram ──────────────────────────────────────────────────────────
         if (platform === 'instagram') {
           const info = await downloadInstagram(url);
           const { buffer } = await getBuffer(info.downloadUrl);
 
           await sock.sendMessage(sender, {
             video  : buffer,
-            caption: '📸 *' + info.title + '*\n\n📥 via savefrom.net'
+            caption: '📸 *' + info.title + '*\n\n📥 via cobalt.tools'
           }, { quoted: msg });
           return;
         }
@@ -293,7 +291,7 @@ const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...ar
             '📋 Alasan: ' + err.message + '\n\n' +
             '💡 *Tips:*\n' +
             '• Pastikan video tidak private\n' +
-            '• Untuk YouTube, coba link pendek youtu.be/xxx\n' +
+            '• Untuk YouTube, coba link youtu.be/xxx\n' +
             '• Coba lagi beberapa saat'
         }, { quoted: msg });
       }
