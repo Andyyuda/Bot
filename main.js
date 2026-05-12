@@ -525,7 +525,19 @@ async function start() {
     }
 
     if (!text) return;
-    console.log(chalk.blue(`[IN] ${senderJid} -> ${remoteJid}: ${text}`));
+    // Ambil nama: pushName dari pesan, fallback ke nomor
+const senderName = msg.pushName || senderNumber || senderJid;
+const targetLabel = isGroupMsg
+  ? chalk.magenta(`[GRUP]`)
+  : chalk.cyan(`[PM]`);
+
+console.log(
+  targetLabel +
+  chalk.blue(` ${senderName}`) +
+  chalk.gray(` (${senderJid})`) +
+  chalk.white(` → ${remoteJid}`) +
+  chalk.yellow(`: ${text}`)
+);
 
     // ⛔ Cek mode akses
     let mode = 'off';
@@ -609,5 +621,15 @@ app.get('/ping', (req, res) => res.send('PONG'));
 app.listen(PORT, () => {
   console.log(chalk.green(`🌐 Web server running on port ${PORT}`));
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🎨 Credit Banner
+// ─────────────────────────────────────────────────────────────────────────────
+console.log(chalk.bgMagenta.white.bold('\n╔══════════════════════════════════════╗'));
+console.log(chalk.bgMagenta.white.bold('   ✨  BOTWA — WhatsApp Bot Engine     '));
+console.log(chalk.bgMagenta.white.bold('   👤  Dev  : YourName                 '));
+console.log(chalk.bgMagenta.white.bold('   📦  Ver  : 1.0.0                    '));
+console.log(chalk.bgMagenta.white.bold('   🔗  Git  : github.com/yourrepo      '));
+console.log(chalk.bgMagenta.white.bold('╚══════════════════════════════════════╝\n'));
 
 start();
