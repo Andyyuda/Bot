@@ -3,8 +3,9 @@
  *
  * ── OWNER ────────────────────────────────────────────────
  *   .saldo              — cek saldo akun isipulsa
- *   .trx [n]            — n transaksi terakhir (default 5)
+ *   .trx [n]            — n transaksi terakhir + Voucher ID
  *   .addpaket           — tambah paket ke katalog (multi-step)
+ *   .importpaket        — import bulk paket dari JSON isipulsa app
  *   .delpaket <kode>    — hapus paket
  *   .editpaket <kode> harga <baru>
  *
@@ -117,7 +118,7 @@ function guessOp(nama) {
 // ═══════════════════════════════════════════════════════════
 module.exports = {
   name: 'pulsa',
-  command: ['.saldo', '.trx', '.addpaket', '.delpaket', '.editpaket', '.listpaket', '.cekop', '.beli'],
+  command: ['.saldo', '.trx', '.addpaket', '.importpaket', '.delpaket', '.editpaket', '.listpaket', '.cekop', '.beli'],
 
   // ─── handleSession: dipanggil main.js saat ada global.userState[sender]
   //     Signature wajib: (conn, sender, text, msg)
@@ -157,6 +158,76 @@ module.exports = {
         }
         return reply(`❌ *Gagal*\n${res.message || 'Coba lagi nanti.'}`);
       } catch (e) { return reply(`❌ Error: ${e.message}`); }
+    }
+
+    // ── IMPORT PAKET DARI JSON ─────────────────────────────
+    if (step === 'importpaket_paste') {
+      const t = text.trim();
+      if (['batal', 'cancel'].includes(t.toLowerCase())) {
+        delete global.userState[sender];
+        return reply('❎ Import dibatalkan.');
+      }
+      // Parse JSON — bisa berupa array voucher atau objek dengan field vouchers/results
+      let items = [];
+      try {
+        let parsed = JSON.parse(t);
+        // berbagai kemungkinan struktur dari isipulsa app
+        if (Array.isArray(parsed))                          items = parsed;
+        else if (Array.isArray(parsed.results))             items = parsed.results;
+        else if (Array.isArray(parsed.vouchers))            items = parsed.vouchers;
+        else if (parsed.vouchers?.results)                  items = parsed.vouchers.results;
+        else if (parsed.data && Array.isArray(parsed.data)) items = parsed.data;
+        else {
+          // coba cari array apapun di root
+          const val = Object.values(parsed).find(v => Array.isArray(v));
+          if (val) items = val;
+        }
+      } catch {
+        return reply('❌ JSON tidak valid. Paste ulang JSON dari PCAPdroid, atau ketik *batal*.');
+      }
+      if (!items.length) {
+        return reply('⚠️ Tidak ada item ditemukan di JSON ini.\nCoba struktur JSON lain, atau ketik *batal*.');
+      }
+
+      const catalog  = loadCatalog();
+      let added = 0, skipped = 0;
+      const lines = [];
+      for (const item of items) {
+        const vid  = String(item.id || item.voucher_id || '').trim();
+        const nama = (item.name || item.voucher_name || item.title || '').trim();
+        if (!vid || !nama) { skipped++; continue; }
+        // Buat kode otomatis dari nama: huruf kecil, spasi → _, maks 12 char
+        let kode = nama.toLowerCase()
+          .replace(/[^a-z0-9\s]/g, '')
+          .replace(/\s+/g, '_')
+          .slice(0, 12)
+          .replace(/_+$/, '');
+        // Hindari duplikat kode
+        let finalKode = kode;
+        let i = 2;
+        while (catalog[finalKode]) { finalKode = `${kode}${i++}`; }
+
+        const harga    = parseInt(item.price || item.harga || 0) || 0;
+        const operator = guessOp(nama);
+        catalog[finalKode] = { voucherId: vid, harga, nama, operator, createdAt: new Date().toISOString() };
+        lines.push(`✅ \`${finalKode}\` — ${nama} (ID:${vid})`);
+        added++;
+      }
+      if (!added) {
+        delete global.userState[sender];
+        return reply(`⚠️ Tidak ada paket yang bisa diimport (${skipped} item skip karena data tidak lengkap).`);
+      }
+      saveCatalog(catalog);
+      delete global.userState[sender];
+      const preview = lines.slice(0, 20).join('\n');
+      const more    = lines.length > 20 ? `\n_...dan ${lines.length - 20} paket lainnya_` : '';
+      return reply(
+        `🎉 *Import Selesai!*\n\n` +
+        `📦 Berhasil: *${added}* paket\n` +
+        (skipped ? `⚠️ Skip: ${skipped} item (data tidak lengkap)\n` : '') +
+        `\n${preview}${more}\n\n` +
+        `_Lihat semua: .listpaket_`
+      );
     }
 
     // ── ADD PAKET STEP-BY-STEP ─────────────────────────────
@@ -242,7 +313,7 @@ module.exports = {
       if (!owner) return reply('⛔ Perintah ini khusus owner.');
       const limit = Math.min(parseInt(args[0]) || 5, 20);
       try {
-        const res = await apiGet({ 'requests[1]': 'transactions' });
+        const res = await apiGet({ 'requests[1]': 'transactions', 'requests[1][limit]': String(limit) });
         if (!res.success) return reply(`❌ ${res.message || 'Gagal'}`);
         const { total, results } = res.transactions?.results || {};
         if (!results?.length) return reply('📭 Belum ada transaksi.');
@@ -251,8 +322,10 @@ module.exports = {
           const icon = t.is_success ? '✅' : t.is_in_process ? '⏳' : t.is_refund ? '↩️' : '❌';
           teks += `${icon} *${t.voucher?.name || '-'}*\n`;
           teks += `   📞 ${t.phone}  💵 ${t.price_str}\n`;
+          teks += `   🎫 Voucher ID: \`${t.voucher?.id || '-'}\`\n`;
           teks += `   📅 ${t.date}\n\n`;
         }
+        teks += `_Voucher ID bisa dipakai saat .addpaket_`;
         return reply(teks.trim());
       } catch (e) { return reply(`❌ ${e.message}`); }
     }
@@ -266,6 +339,22 @@ module.exports = {
         `Langkah 1/4 — Masukkan *kode paket* (unik, tanpa spasi):\n` +
         `_(contoh: xl14gb, isat1gb, tsel5gb)_\n\n` +
         `_Ketik batal untuk membatalkan_`
+      );
+    }
+
+    // ── .importpaket — bulk import dari JSON PCAPdroid ────────
+    if (cmd === '.importpaket') {
+      if (!owner) return reply('⛔ Perintah ini khusus owner.');
+      global.userState[sender] = { status: 'pulsa', step: 'importpaket_paste' };
+      return reply(
+        `📥 *Import Paket dari JSON*\n\n` +
+        `Cara mendapatkan JSON:\n` +
+        `1. Buka *PCAPdroid* → mulai capture\n` +
+        `2. Buka app *isipulsa* → pilih kategori paket → pilih operator\n` +
+        `3. Tunggu daftar paket muncul\n` +
+        `4. Stop PCAPdroid → cari request ke \`isipulsa.web.id\`\n` +
+        `5. Copy *response body* (JSON) → paste di sini\n\n` +
+        `_Atau ketik *batal* untuk membatalkan_`
       );
     }
 
