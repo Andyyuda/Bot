@@ -3,12 +3,17 @@
  * Contoh: .dompul 087812345678
  */
 
-const API_URL  = 'https://apigw.kmsp-store.com/sidompul/v4/cek_kuota';
-const HEADERS  = {
+const API_URL = 'https://apigw.kmsp-store.com/sidompul/v4/cek_kuota';
+const HEADERS = {
   'Authorization': 'Basic c2lkb21wdWxhcGk6YXBpZ3drbXNw',
   'X-API-Key'    : '60ef29aa-a648-4668-90ae-20951ef90c55',
   'X-App-Version': '4.0.0'
 };
+
+function fmtDate(str) {
+  if (!str) return '-';
+  return str.replace('T', ' ').replace(/:\d\d$/, '');
+}
 
 module.exports = {
   name: '.dompul',
@@ -58,19 +63,29 @@ module.exports = {
 
       teks += `\n📦 *Detail Kuota:*\n\n`;
 
-      const quotas = d.quotas?.value || [];
-      if (quotas.length === 0) {
+      // value = array of arrays, tiap inner array = 1 paket
+      const quotaGroups = d.quotas?.value || [];
+      if (quotaGroups.length === 0) {
         teks += `- Tidak ada kuota terdaftar.\n`;
       } else {
-        for (const paket of quotas) {
-          teks += `📌 *${paket.name}*\n`;
-          if (paket.date_end) teks += `   ├ 📆 *Aktif Sampai:* ${paket.date_end}\n`;
-          const details = paket.detail_quota || [];
-          details.forEach((kuota, i) => {
-            const isLast = i === details.length - 1;
-            teks += `   ${isLast ? '└' : '├'} ${kuota.name}: *${kuota.remaining_text}* dari ${kuota.total_text}\n`;
-          });
-          teks += '\n';
+        for (const group of quotaGroups) {
+          for (const paket of group) {
+            const pkg      = paket.packages || {};
+            const benefits = paket.benefits || [];
+
+            teks += `📌 *${pkg.name || '-'}*\n`;
+            if (pkg.expDate) teks += `   ├ 📆 *Aktif Sampai:* ${fmtDate(pkg.expDate)}\n`;
+
+            benefits.forEach((b, i) => {
+              const isLast = i === benefits.length - 1;
+              const sisa   = b.remaining !== b.quota
+                ? `${b.remaining} / ${b.quota}`
+                : b.quota;
+              teks += `   ${isLast ? '└' : '├'} ${b.bname}: *${sisa}*\n`;
+            });
+
+            teks += '\n';
+          }
         }
       }
 
