@@ -9,7 +9,14 @@
  * Ganti 'gantipin' dengan PIN buatan kamu sendiri
  */
 module.exports = {
-  owner: ['248335797633091', '268530129858702', '6282131861788'],
+  owner: ['248335797633091', '268530129858702', '6282131861788', '6287819104999'],
   ownerPin: 'gantipin123',
   prefix: '.',   // prefix default (bisa diubah via .setprefix)
+
+  // isipulsa.web.id — kredensial untuk jualan pulsa
+  isipulsa: {
+    username: 'andyyuda',
+    token: '1755860:32EpB7yRZ9jYhOtH8Al0srVzMQbfdXIm',
+    appVersionCode: '250608',
+  },
 };
