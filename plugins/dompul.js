@@ -3,6 +3,13 @@
  * Contoh: .dompul 087812345678
  */
 
+const API_URL  = 'https://apigw.kmsp-store.com/sidompul/v4/cek_kuota';
+const HEADERS  = {
+  'Authorization': 'Basic c2lkb21wdWxhcGk6YXBpZ3drbXNw',
+  'X-API-Key'    : '60ef29aa-a648-4668-90ae-20951ef90c55',
+  'X-App-Version': '4.0.0'
+};
+
 module.exports = {
   name: '.dompul',
   command: ['.dompul', '.sidompul', '.cekpaket'],
@@ -12,7 +19,7 @@ module.exports = {
 
     if (!args[0]) {
       return reply(
-        '📲 *CEK PAKET DOMPUL*\n\n' +
+        '📲 *CEK PAKET DOMPUL (XL)*\n\n' +
         'Masukkan nomor setelah perintah.\n' +
         'Contoh:\n' +
         '*.dompul 087812345678*\n' +
@@ -26,23 +33,15 @@ module.exports = {
     await reply(`🔍 Mengecek nomor *${nomor}*...\nHarap tunggu sebentar.`);
 
     try {
-      const res = await fetch('https://end.kaje-store.com/api/sidompul/check_package', {
-        method: 'POST',
-        headers: {
-          'x-token-auth': 'mm8D4vAWXV6Q35WLMeK2fXy',
-          'x-ip-visitor': '192.241.152.59',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ number: nomor, device_id: 'fake' })
-      });
-
+      const res  = await fetch(`${API_URL}?msisdn=${nomor}&isJSON=true`, { headers: HEADERS });
       const data = await res.json();
 
-      if (!data?.success) {
+      if (!data?.status) {
         return reply(`❌ ${data?.message || 'Gagal mengecek paket, coba lagi nanti.'}`);
       }
 
-      const d = data.data;
+      const d = data.data?.data_sp;
+
       let teks = `✅ *Cek Paket Dompul Berhasil!*\n\n`;
       teks += `📞 *Nomor:* ${nomor}\n`;
       teks += `📡 *Provider:* ${d.prefix?.value || '-'}\n`;
@@ -50,8 +49,14 @@ module.exports = {
       teks += `🗓️ *Umur Kartu:* ${d.active_card?.value || '-'}\n`;
       teks += `📆 *Masa Aktif:* ${d.active_period?.value || '-'}\n`;
       teks += `⌛ *Akhir Tenggang:* ${d.grace_period?.value || '-'}\n`;
-      teks += `📶 *Status SIM:* ${d.status_4g?.value || '-'}\n\n`;
-      teks += `📦 *Detail Kuota:*\n\n`;
+      teks += `📶 *Status 4G:* ${d.status_4g?.value || '-'}\n`;
+
+      const volte = d.status_volte?.value;
+      if (volte) {
+        teks += `📳 *VoLTE:* Device ${volte.device ? '✅' : '❌'} | Area ${volte.area ? '✅' : '❌'} | SIM ${volte.simcard ? '✅' : '❌'}\n`;
+      }
+
+      teks += `\n📦 *Detail Kuota:*\n\n`;
 
       const quotas = d.quotas?.value || [];
       if (quotas.length === 0) {
@@ -59,7 +64,7 @@ module.exports = {
       } else {
         for (const paket of quotas) {
           teks += `📌 *${paket.name}*\n`;
-          teks += `   ├ 📆 *Aktif Sampai:* ${paket.date_end}\n`;
+          if (paket.date_end) teks += `   ├ 📆 *Aktif Sampai:* ${paket.date_end}\n`;
           const details = paket.detail_quota || [];
           details.forEach((kuota, i) => {
             const isLast = i === details.length - 1;
