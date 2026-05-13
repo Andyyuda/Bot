@@ -61,6 +61,15 @@ module.exports = {
         teks += `📳 *VoLTE:* Device ${volte.device ? '✅' : '❌'} | Area ${volte.area ? '✅' : '❌'} | SIM ${volte.simcard ? '✅' : '❌'}\n`;
       }
 
+      // Cek rate limit dari field hasil
+      const hasil = data.data?.hasil || '';
+      const bersihHasil = hasil.replace(/<br>/gi, '\n').replace(/<[^>]+>/g, '');
+      const rateLimit = bersihHasil.match(/batas maksimal[^\n]*/i);
+      if (rateLimit) {
+        teks += `\n⚠️ *${rateLimit[0].trim()}*`;
+        return await reply(teks);
+      }
+
       teks += `\n📦 *Detail Kuota:*\n\n`;
 
       // value = array of arrays, tiap inner array = 1 paket
