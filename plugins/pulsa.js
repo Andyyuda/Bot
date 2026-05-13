@@ -1,25 +1,20 @@
 /**
  * Plugin Jualan Pulsa & Paket — isipulsa.web.id
  *
- * ── OWNER COMMANDS ────────────────────────────────────────────────
- *   .saldo                          — cek saldo akun isipulsa
- *   .trx [n]                        — n transaksi terakhir (default 5)
- *   .addpaket <kode> <voucher_id> <harga_jual> <nama>
- *                                   — tambah paket ke katalog
- *                                     contoh: .addpaket xl14gb 8021 75000 XL Flex M+ 14GB 28hr
- *   .delpaket <kode>                — hapus paket dari katalog
- *   .editpaket <kode> harga <baru>  — ubah harga paket
+ * ── OWNER ────────────────────────────────────────────────
+ *   .saldo              — cek saldo akun isipulsa
+ *   .trx [n]            — n transaksi terakhir (default 5)
+ *   .addpaket           — tambah paket ke katalog (multi-step)
+ *   .delpaket <kode>    — hapus paket
+ *   .editpaket <kode> harga <baru>
  *
- * ── CUSTOMER COMMANDS ─────────────────────────────────────────────
- *   .listpaket [operator]           — lihat daftar paket (semua / filter operator)
- *   .cekop <nomor>                  — deteksi operator dari nomor HP
- *   .beli <nomor> <kode_paket>      — beli paket (owner confirm dulu)
+ * ── SEMUA USER ───────────────────────────────────────────
+ *   .listpaket [op]     — daftar paket (filter: xl/indosat/telkomsel/dll)
+ *   .cekop <nomor>      — deteksi operator
+ *   .beli <nomor> <kode>— beli paket (ada konfirmasi)
  *
- * ── KATALOG ───────────────────────────────────────────────────────
- *   disimpan di botwa/database/pulsa_catalog.json
- *   format: { "<kode>": { voucherId, harga, nama, operator, createdAt } }
- *
- * Konfigurasi: setting.js → isipulsa.username / token / appVersionCode
+ * Katalog: botwa/database/pulsa_catalog.json
+ * Kredensial: setting.js → isipulsa.username / token / appVersionCode
  */
 
 const https   = require('https');
@@ -29,47 +24,47 @@ const fs      = require('fs');
 const path    = require('path');
 const setting = require('../setting.js');
 
-// ── Config
 const BASE     = 'isipulsa.web.id';
 const cfg      = setting.isipulsa || {};
-const USERNAME = cfg.username       || '';
-const TOKEN    = cfg.token          || '';
-const VER      = cfg.appVersionCode || '250608';
+const USERNAME = cfg.username        || '';
+const TOKEN    = cfg.token           || '';
+const VER      = cfg.appVersionCode  || '250608';
 
-// ── Catalog path
-const CATALOG_PATH = path.join(__dirname, '../database/pulsa_catalog.json');
-
-// ── In-memory state
-const confirmPending = new Map(); // sender → { nomor, kode, expiry }
-const validatorCache = { data: null, time: 0 };
+const CATALOG_PATH   = path.join(__dirname, '../database/pulsa_catalog.json');
 const VALIDATOR_TTL  = 3_600_000; // 1 jam
-const CONFIRM_TTL    = 60_000;    // 60 detik
 
-// ──────────────────────────── CATALOG IO ────────────────────────────
+let _validators = null;
+let _validatorTs = 0;
+
+// ─── Catalog IO ────────────────────────────────────────────
 function loadCatalog() {
   try {
     if (fs.existsSync(CATALOG_PATH)) return JSON.parse(fs.readFileSync(CATALOG_PATH, 'utf8'));
   } catch {}
   return {};
 }
-
 function saveCatalog(data) {
   fs.mkdirSync(path.dirname(CATALOG_PATH), { recursive: true });
   fs.writeFileSync(CATALOG_PATH, JSON.stringify(data, null, 2));
 }
 
-// ──────────────────────────── API HELPER ────────────────────────────
+// ─── API Helper ────────────────────────────────────────────
 function apiCall(apiPath, params) {
   return new Promise((resolve, reject) => {
     const body = qs.stringify({ app_version_code: VER, auth_username: USERNAME, auth_token: TOKEN, ...params });
     const req  = https.request({
       hostname: BASE, path: apiPath, method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'okhttp/4.12.0', 'accept-encoding': 'gzip', 'content-length': Buffer.byteLength(body) },
-    }, (res) => {
+      headers: {
+        'content-type'   : 'application/x-www-form-urlencoded',
+        'user-agent'     : 'okhttp/4.12.0',
+        'accept-encoding': 'gzip',
+        'content-length' : Buffer.byteLength(body),
+      },
+    }, res => {
       const chunks = [];
       res.on('data', c => chunks.push(c));
       res.on('end', () => {
-        const raw  = Buffer.concat(chunks);
+        const raw   = Buffer.concat(chunks);
         const parse = buf => { try { resolve(JSON.parse(buf.toString())); } catch (e) { reject(e); } };
         (res.headers['content-encoding'] || '').includes('gzip')
           ? zlib.gunzip(raw, (e, b) => e ? reject(e) : parse(b))
@@ -81,19 +76,17 @@ function apiCall(apiPath, params) {
     req.end();
   });
 }
-
-const apiGet   = p => apiCall('/api/v2/get', { vss: 1, ...p });
+const apiGet   = p => apiCall('/api/v2/get',   { vss: 1, ...p });
 const apiOrder = p => apiCall('/api/v2/order', p);
 
-// ──────────────────────────── OPERATOR DETECT ───────────────────────
+// ─── Operator detect ───────────────────────────────────────
 async function getValidators() {
-  if (validatorCache.data && Date.now() - validatorCache.time < VALIDATOR_TTL) return validatorCache.data;
+  if (_validators && Date.now() - _validatorTs < VALIDATOR_TTL) return _validators;
   const res = await apiGet({ 'requests[2]': 'validators' });
-  if (res.validators?.success) { validatorCache.data = res.validators.results; validatorCache.time = Date.now(); }
-  return validatorCache.data || [];
+  if (res.validators?.success) { _validators = res.validators.results; _validatorTs = Date.now(); }
+  return _validators || [];
 }
-
-function detectOperator(nomor, validators) {
+function detectOp(nomor, validators) {
   let n = String(nomor).replace(/\D/g, '');
   if (n.startsWith('62')) n = '0' + n.slice(2);
   for (const v of validators) {
@@ -102,77 +95,155 @@ function detectOperator(nomor, validators) {
   return null;
 }
 
-// ──────────────────────────── UTILS ─────────────────────────────────
+// ─── Utils ─────────────────────────────────────────────────
 const rp      = n => `Rp ${Number(n).toLocaleString('id-ID')}`;
-const isOwner = sender => {
-  const num = sender.split('@')[0].split(':')[0];
-  return setting.owner.some(o => num.includes(o) || o.includes(num));
+const isOwner = senderJid => {
+  const num = senderJid.split('@')[0].split(':')[0];
+  return (setting.owner || []).some(o => num.includes(o) || o.includes(num));
 };
+function guessOp(nama) {
+  const n = nama.toLowerCase();
+  if (n.includes('telkomsel') || n.includes('simpati') || n.includes('kartu as') || n.includes('loop')) return 'Telkomsel';
+  if (n.includes('xl') || n.includes('xtra')) return 'XL';
+  if (n.includes('axis')) return 'Axis';
+  if (n.includes('indosat') || n.includes('im3') || n.includes('ooredoo')) return 'Indosat';
+  if (n.includes('three') || n.includes('tri') || n.includes(' 3 ') || n.includes('3id')) return 'Three';
+  if (n.includes('smartfren')) return 'Smartfren';
+  if (n.includes('pln') || n.includes('token')) return 'PLN';
+  if (n.includes('byu')) return 'Byu';
+  return 'Umum';
+}
 
-// ──────────────────────────── MODULE ─────────────────────────────────
+// ═══════════════════════════════════════════════════════════
 module.exports = {
   name: 'pulsa',
   command: ['.saldo', '.trx', '.addpaket', '.delpaket', '.editpaket', '.listpaket', '.cekop', '.beli'],
 
-  // ── handleMessage: proses konfirmasi beli
-  async handleMessage(conn, sender, text, msg) {
-    const conf = confirmPending.get(sender);
-    if (!conf) return false;
-    if (Date.now() > conf.expiry) { confirmPending.delete(sender); return false; }
+  // ─── handleSession: dipanggil main.js saat ada global.userState[sender]
+  //     Signature wajib: (conn, sender, text, msg)
+  async handleSession(conn, sender, text, msg) {
+    const session = global.userState[sender];
+    if (!session || session.status !== 'pulsa') return;
 
-    const t = text.trim().toLowerCase();
-    if (!['ya','iya','y','tidak','batal','cancel','no','n'].includes(t)) return false;
-
-    confirmPending.delete(sender);
     const reply = txt => conn.sendMessage(sender, { text: txt }, { quoted: msg });
+    const step  = session.step;
 
-    if (['tidak','batal','cancel','no','n'].includes(t)) return reply('❎ Transaksi dibatalkan.'), true;
-
-    // Lanjut beli
-    await reply('⏳ Memproses transaksi...');
-    try {
-      const res = await apiOrder({ voucher_id: conf.voucherId, phone: conf.nomor, payment: 'balance' });
-      if (res.status) {
-        const catalog = loadCatalog();
-        const paket   = catalog[conf.kode] || {};
-        await reply(
-          `✅ *Transaksi Berhasil!*\n\n` +
-          `📞 Nomor: *${conf.nomor}*\n` +
-          `📦 Paket: *${paket.nama || conf.kode}*\n` +
-          `💵 Harga: *${rp(paket.harga || '-')}*\n` +
-          `🆔 ID Transaksi: ${res.id || '-'}\n\n` +
-          `Terima kasih sudah berbelanja! 🙏`
-        );
-      } else {
-        await reply(`❌ *Transaksi Gagal*\n\n${res.message || 'Coba lagi nanti.'}`);
+    // ── KONFIRMASI BELI ────────────────────────────────────
+    if (step === 'beli_konfirm') {
+      const t = text.trim().toLowerCase();
+      if (['tidak', 'batal', 'cancel', 'no', 'n'].includes(t)) {
+        delete global.userState[sender];
+        return reply('❎ Transaksi dibatalkan.');
       }
-    } catch (e) { await reply(`❌ Error: ${e.message}`); }
-    return true;
+      if (!['ya', 'iya', 'y'].includes(t)) {
+        return reply('Ketik *ya* untuk lanjut atau *batal* untuk membatalkan.');
+      }
+
+      delete global.userState[sender];
+      await reply('⏳ Memproses transaksi...');
+      try {
+        const res = await apiOrder({ voucher_id: session.voucherId, phone: session.nomor, payment: 'balance' });
+        const catalog = loadCatalog();
+        const paket   = catalog[session.kode] || {};
+        if (res.status) {
+          return reply(
+            `✅ *Transaksi Berhasil!*\n\n` +
+            `📞 Nomor: *${session.nomor}*\n` +
+            `📦 Paket: *${paket.nama || session.kode}*\n` +
+            `💵 Harga: *${rp(paket.harga || 0)}*\n` +
+            `🆔 ID: ${res.id || '-'}\n\n` +
+            `Terima kasih sudah berbelanja! 🙏`
+          );
+        }
+        return reply(`❌ *Gagal*\n${res.message || 'Coba lagi nanti.'}`);
+      } catch (e) { return reply(`❌ Error: ${e.message}`); }
+    }
+
+    // ── ADD PAKET STEP-BY-STEP ─────────────────────────────
+    if (step === 'addpaket_kode') {
+      const kode = text.trim().toLowerCase().replace(/\s+/g, '_');
+      if (!kode) return reply('⚠️ Kode tidak boleh kosong.');
+      const catalog = loadCatalog();
+      if (catalog[kode]) {
+        return reply(`⚠️ Kode *${kode}* sudah ada.\nGunakan kode lain atau hapus dulu dengan .delpaket ${kode}`);
+      }
+      session.kode = kode;
+      session.step = 'addpaket_vid';
+      return reply(`✅ Kode: *${kode}*\n\n🎫 Sekarang masukkan *Voucher ID* dari app isipulsa:\n_(angka saja, contoh: 8021)_`);
+    }
+
+    if (step === 'addpaket_vid') {
+      const vid = text.trim();
+      if (isNaN(parseInt(vid))) return reply('⚠️ Voucher ID harus berupa angka. Coba lagi:');
+      session.voucherId = vid;
+      session.step = 'addpaket_harga';
+      return reply(`✅ Voucher ID: *${vid}*\n\n💰 Sekarang masukkan *harga jual* (angka saja, contoh: 75000):`);
+    }
+
+    if (step === 'addpaket_harga') {
+      const harga = parseInt(text.trim().replace(/\./g, '').replace(/,/g, ''));
+      if (isNaN(harga) || harga <= 0) return reply('⚠️ Harga tidak valid. Masukkan angka saja (contoh: 75000):');
+      session.harga = harga;
+      session.step  = 'addpaket_nama';
+      return reply(`✅ Harga: *${rp(harga)}*\n\n📦 Sekarang masukkan *nama paket*:\n_(contoh: XL Flex M+ 14GB 28hr)_`);
+    }
+
+    if (step === 'addpaket_nama') {
+      const nama     = text.trim();
+      if (!nama) return reply('⚠️ Nama tidak boleh kosong.');
+      const operator = guessOp(nama);
+      const catalog  = loadCatalog();
+      catalog[session.kode] = {
+        voucherId: session.voucherId,
+        harga    : session.harga,
+        nama,
+        operator,
+        createdAt: new Date().toISOString(),
+      };
+      saveCatalog(catalog);
+      delete global.userState[sender];
+      return reply(
+        `✅ *Paket berhasil ditambahkan!*\n\n` +
+        `🔑 Kode: \`${session.kode}\`\n` +
+        `📦 Nama: ${nama}\n` +
+        `📡 Operator: ${operator}\n` +
+        `💵 Harga: *${rp(session.harga)}*\n` +
+        `🎫 Voucher ID: ${session.voucherId}\n\n` +
+        `_Customer bisa pesan dengan: .beli <nomor> ${session.kode}_`
+      );
+    }
   },
 
+  // ─── execute: dipanggil saat command cocok ─────────────────
+  //     Signature: (conn, sender, args, msg, text)
   async execute(conn, sender, args, msg) {
-    const reply = txt => conn.sendMessage(sender, { text: txt }, { quoted: msg });
-    const cmd   = (msg.body || '').trim().split(/\s+/)[0].toLowerCase();
-    const owner = isOwner(sender);
+    const reply  = txt => conn.sendMessage(sender, { text: txt }, { quoted: msg });
+    const cmd    = (msg.message?.conversation || msg.message?.extendedTextMessage?.text || '')
+                    .trim().split(/\s+/)[0].toLowerCase();
+    const owner  = isOwner(sender);
 
-    if (!USERNAME || !TOKEN) return reply('⚠️ Kredensial isipulsa belum diisi di setting.js');
+    if (!USERNAME || !TOKEN) {
+      return reply('⚠️ Kredensial isipulsa belum diisi di setting.js\n(isipulsa.username & isipulsa.token)');
+    }
 
-    // ────────────────── .saldo ──────────────────
+    // ── .saldo ───────────────────────────────────────────────
     if (cmd === '.saldo') {
       if (!owner) return reply('⛔ Perintah ini khusus owner.');
       try {
         const res = await apiGet({ 'requests[0]': 'balance' });
-        const b   = res.balance?.results;
+        if (!res.success) return reply(`❌ ${res.message || 'Gagal ambil saldo'}`);
+        const b = res.balance?.results;
         return reply(`💰 *Saldo isipulsa*\n\n👤 ${USERNAME}\n💵 *${b?.balance_str || rp(b?.balance || 0)}*`);
       } catch (e) { return reply(`❌ ${e.message}`); }
     }
 
-    // ────────────────── .trx [n] ──────────────────
+    // ── .trx [n] ─────────────────────────────────────────────
     if (cmd === '.trx') {
       if (!owner) return reply('⛔ Perintah ini khusus owner.');
       const limit = Math.min(parseInt(args[0]) || 5, 20);
       try {
         const res = await apiGet({ 'requests[1]': 'transactions' });
+        if (!res.success) return reply(`❌ ${res.message || 'Gagal'}`);
         const { total, results } = res.transactions?.results || {};
         if (!results?.length) return reply('📭 Belum ada transaksi.');
         let teks = `🧾 *${Math.min(limit, results.length)} Transaksi Terakhir (Total: ${total})*\n\n`;
@@ -186,58 +257,32 @@ module.exports = {
       } catch (e) { return reply(`❌ ${e.message}`); }
     }
 
-    // ────────────────── .addpaket <kode> <voucher_id> <harga> <nama...> ──────────────────
+    // ── .addpaket (multi-step via session) ───────────────────
     if (cmd === '.addpaket') {
       if (!owner) return reply('⛔ Perintah ini khusus owner.');
-      // .addpaket xl14gb 8021 75000 XL Flex M+ 14GB 28hr
-      if (args.length < 4) {
-        return reply(
-          '📋 *Cara Tambah Paket:*\n\n' +
-          '*.addpaket <kode> <voucher_id> <harga_jual> <nama paket>*\n\n' +
-          'Contoh:\n' +
-          '*.addpaket xl14gb 8021 75000 XL Flex M+ 14GB 28hr*\n' +
-          '*.addpaket isat1gb 4210 8000 Indosat 1GB 14 Hari*\n\n' +
-          '_Voucher ID cari di app isipulsa_ 📱'
-        );
-      }
-      const kode      = args[0].toLowerCase();
-      const voucherId = args[1];
-      const harga     = parseInt(args[2]);
-      const nama      = args.slice(3).join(' ');
-      if (isNaN(harga)) return reply('❌ Harga harus berupa angka');
-
-      // Coba detect operator dari nama
-      let operator = 'Umum';
-      const namaLow = nama.toLowerCase();
-      if (namaLow.includes('telkomsel') || namaLow.includes('simpati') || namaLow.includes('kartu as') || namaLow.includes('loop')) operator = 'Telkomsel';
-      else if (namaLow.includes('xl') || namaLow.includes('xtra')) operator = 'XL';
-      else if (namaLow.includes('axis')) operator = 'Axis';
-      else if (namaLow.includes('indosat') || namaLow.includes('im3') || namaLow.includes('ooredoo')) operator = 'Indosat';
-      else if (namaLow.includes('three') || namaLow.includes('tri') || namaLow.includes('3')) operator = 'Three';
-      else if (namaLow.includes('smartfren')) operator = 'Smartfren';
-      else if (namaLow.includes('pln') || namaLow.includes('token')) operator = 'PLN';
-
-      const catalog = loadCatalog();
-      if (catalog[kode]) return reply(`⚠️ Kode *${kode}* sudah ada. Hapus dulu dengan .delpaket ${kode}`);
-      catalog[kode] = { voucherId, harga, nama, operator, createdAt: new Date().toISOString() };
-      saveCatalog(catalog);
-      return reply(`✅ Paket berhasil ditambahkan!\n\n🔑 Kode: *${kode}*\n📦 Nama: ${nama}\n📡 Operator: ${operator}\n💵 Harga: *${rp(harga)}*\n🎫 Voucher ID: ${voucherId}`);
+      global.userState[sender] = { status: 'pulsa', step: 'addpaket_kode' };
+      return reply(
+        `🛒 *Tambah Paket Baru*\n\n` +
+        `Langkah 1/4 — Masukkan *kode paket* (unik, tanpa spasi):\n` +
+        `_(contoh: xl14gb, isat1gb, tsel5gb)_\n\n` +
+        `_Ketik batal untuk membatalkan_`
+      );
     }
 
-    // ────────────────── .delpaket <kode> ──────────────────
+    // ── .delpaket <kode> ─────────────────────────────────────
     if (cmd === '.delpaket') {
       if (!owner) return reply('⛔ Perintah ini khusus owner.');
-      if (!args[0]) return reply('Usage: *.delpaket <kode>*');
+      if (!args[0]) return reply('Usage: *.delpaket <kode>*\nContoh: .delpaket xl14gb');
       const kode    = args[0].toLowerCase();
       const catalog = loadCatalog();
-      if (!catalog[kode]) return reply(`❌ Paket dengan kode *${kode}* tidak ditemukan.`);
+      if (!catalog[kode]) return reply(`❌ Paket *${kode}* tidak ditemukan.\nLihat daftar: .listpaket`);
       const nama = catalog[kode].nama;
       delete catalog[kode];
       saveCatalog(catalog);
       return reply(`🗑️ Paket *${kode}* (${nama}) berhasil dihapus.`);
     }
 
-    // ────────────────── .editpaket <kode> harga <baru> ──────────────────
+    // ── .editpaket <kode> harga <baru> ───────────────────────
     if (cmd === '.editpaket') {
       if (!owner) return reply('⛔ Perintah ini khusus owner.');
       if (args.length < 3) return reply('Usage: *.editpaket <kode> harga <angka_baru>*');
@@ -247,7 +292,7 @@ module.exports = {
       if (!catalog[kode]) return reply(`❌ Paket *${kode}* tidak ditemukan.`);
       if (field === 'harga') {
         const baru = parseInt(args[2]);
-        if (isNaN(baru)) return reply('❌ Harga harus angka');
+        if (isNaN(baru)) return reply('❌ Harga harus angka.');
         const lama = catalog[kode].harga;
         catalog[kode].harga = baru;
         saveCatalog(catalog);
@@ -256,22 +301,19 @@ module.exports = {
       return reply('Field yang bisa diedit: *harga*');
     }
 
-    // ────────────────── .listpaket [operator] ──────────────────
+    // ── .listpaket [operator] ────────────────────────────────
     if (cmd === '.listpaket') {
-      const catalog = loadCatalog();
-      const entries = Object.entries(catalog);
+      const catalog  = loadCatalog();
+      const entries  = Object.entries(catalog);
       if (!entries.length) {
-        return reply('📭 Katalog kosong.\nOwner bisa tambah paket dengan *.addpaket*');
+        return reply('📭 Katalog kosong.\nOwner tambah paket dengan *.addpaket*');
       }
-
-      const filter  = args[0]?.toLowerCase() || '';
+      const filter   = (args[0] || '').toLowerCase();
       const filtered = filter
         ? entries.filter(([, v]) => v.operator.toLowerCase().includes(filter) || v.nama.toLowerCase().includes(filter))
         : entries;
+      if (!filtered.length) return reply(`❌ Tidak ada paket untuk filter *${args[0]}*`);
 
-      if (!filtered.length) return reply(`❌ Tidak ada paket untuk operator *${args[0]}*`);
-
-      // Kelompokkan per operator
       const groups = {};
       for (const [kode, v] of filtered) {
         if (!groups[v.operator]) groups[v.operator] = [];
@@ -284,29 +326,28 @@ module.exports = {
       for (const [op, items] of Object.entries(groups)) {
         teks += `📡 *${op}*\n`;
         for (const item of items) {
-          teks += `   ┌ 🔑 Kode: \`${item.kode}\`\n`;
-          teks += `   ├ 📦 ${item.nama}\n`;
-          teks += `   └ 💵 *${rp(item.harga)}*\n\n`;
+          teks += `  🔑 \`${item.kode}\` — ${item.nama}\n`;
+          teks += `       💵 *${rp(item.harga)}*\n\n`;
         }
       }
-      teks += `_Order: .beli <nomor> <kode_paket>_`;
+      teks += `_Order: .beli <nomor> <kode>_`;
       return reply(teks);
     }
 
-    // ────────────────── .cekop <nomor> ──────────────────
+    // ── .cekop <nomor> ───────────────────────────────────────
     if (cmd === '.cekop') {
       if (!args[0]) return reply('Usage: *.cekop <nomor>*\nContoh: .cekop 085212345678');
       try {
         const validators = await getValidators();
-        const op = detectOperator(args[0], validators);
+        const op = detectOp(args[0], validators);
         return reply(op
-          ? `📡 Nomor *${args[0]}* → Operator: *${op}*`
-          : `❓ Operator tidak dikenali untuk nomor *${args[0]}*`
+          ? `📡 Nomor *${args[0]}* → *${op}*`
+          : `❓ Operator tidak dikenali untuk *${args[0]}*`
         );
       } catch (e) { return reply(`❌ ${e.message}`); }
     }
 
-    // ────────────────── .beli <nomor> <kode_paket> ──────────────────
+    // ── .beli <nomor> <kode> ─────────────────────────────────
     if (cmd === '.beli') {
       if (!args[0] || !args[1]) {
         const catalog = loadCatalog();
@@ -327,16 +368,21 @@ module.exports = {
       const paket   = catalog[kode];
       if (!paket) return reply(`❌ Paket *${kode}* tidak ditemukan.\nLihat daftar: *.listpaket*`);
 
-      // Deteksi operator
       let opInfo = '';
       try {
         const validators = await getValidators();
-        const op = detectOperator(nomor, validators);
+        const op = detectOp(nomor, validators);
         if (op) opInfo = `📡 Operator: *${op}*\n`;
       } catch {}
 
-      // Simpan konfirmasi pending
-      confirmPending.set(sender, { nomor, kode, voucherId: paket.voucherId, expiry: Date.now() + CONFIRM_TTL });
+      // Set session untuk konfirmasi
+      global.userState[sender] = {
+        status   : 'pulsa',
+        step     : 'beli_konfirm',
+        nomor,
+        kode,
+        voucherId: paket.voucherId,
+      };
 
       return reply(
         `⚠️ *Konfirmasi Pembelian*\n\n` +
@@ -345,8 +391,7 @@ module.exports = {
         `📦 Paket: *${paket.nama}*\n` +
         `💵 Harga: *${rp(paket.harga)}*\n` +
         `💳 Bayar via: Saldo Akun\n\n` +
-        `Ketik *ya* untuk konfirmasi\nKetik *batal* untuk membatalkan\n` +
-        `_(Otomatis batal dalam 60 detik)_`
+        `Balas *ya* untuk lanjut\nBalas *batal* untuk membatalkan`
       );
     }
   },
