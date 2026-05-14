@@ -28,6 +28,7 @@ const qs      = require('querystring');
 const fs      = require('fs');
 const path    = require('path');
 const setting = require('../setting.js');
+const { isOwner: _isOwner } = require('../lib/helper');
 
 const BASE = 'isipulsa.web.id';
 const cfg  = setting.isipulsa || {};
@@ -138,10 +139,7 @@ function detectOp(nomor, validators) {
 
 // ─── Utils ─────────────────────────────────────────────────
 const rp      = n => `Rp ${Number(n).toLocaleString('id-ID')}`;
-const isOwner = senderJid => {
-  const num = senderJid.split('@')[0].split(':')[0];
-  return (setting.owner || []).some(o => num.includes(o) || o.includes(num));
-};
+const isOwner = senderJid => _isOwner(senderJid, setting.owner || []);
 function guessOp(nama) {
   const n = nama.toLowerCase();
   if (n.includes('telkomsel') || n.includes('simpati') || n.includes('kartu as') || n.includes('loop')) return 'Telkomsel';
