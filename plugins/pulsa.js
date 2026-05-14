@@ -369,11 +369,13 @@ module.exports = {
   // ─── execute: dipanggil saat command cocok ─────────────────
   //     Signature: (conn, sender, args, msg, text)
   async execute(conn, sender, args, msg) {
-    const reply  = txt => conn.sendMessage(sender, { text: txt }, { quoted: msg });
-    const cmd    = (msg.message?.conversation || msg.message?.extendedTextMessage?.text || '')
-                    .trim().split(/\s+/)[0].toLowerCase();
-    const owner = isOwner(sender);
-    const auth  = getAuth(sender);
+    const reply      = txt => conn.sendMessage(sender, { text: txt }, { quoted: msg });
+    const cmd        = (msg.message?.conversation || msg.message?.extendedTextMessage?.text || '')
+                        .trim().split(/\s+/)[0].toLowerCase();
+    // sender = remoteJid (bisa group). Gunakan participant untuk cek owner & auth
+    const senderJid  = msg.key?.participant || sender;
+    const owner      = isOwner(senderJid);
+    const auth       = getAuth(senderJid);
     const hasAuth = !!(auth.username && auth.token);
 
     // ── .loginpulsa ──────────────────────────────────────────
@@ -390,7 +392,7 @@ module.exports = {
     // ── .logoutpulsa ─────────────────────────────────────────
     if (cmd === '.logoutpulsa') {
       const users  = loadUsers();
-      const jidKey = sender.split('@')[0].split(':')[0];
+      const jidKey = senderJid.split('@')[0].split(':')[0];
       if (!users[jidKey]) return reply('⚠️ Kamu belum login. Gunakan *.loginpulsa* dulu.');
       const uname = users[jidKey].username;
       delete users[jidKey];
