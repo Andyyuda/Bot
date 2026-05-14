@@ -10,12 +10,16 @@
  *   .editpaket <kode> harga <baru>
  *
  * ── SEMUA USER ───────────────────────────────────────────
+ *   .loginpulsa         — daftar / login akun isipulsa sendiri
+ *   .logoutpulsa        — hapus token isipulsa tersimpan
+ *   .saldoku            — cek saldo akun isipulsa sendiri
  *   .listpaket [op]     — daftar paket (filter: xl/indosat/telkomsel/dll)
  *   .cekop <nomor>      — deteksi operator
  *   .beli <nomor> <kode>— beli paket (ada konfirmasi)
  *
- * Katalog: botwa/database/pulsa_catalog.json
- * Kredensial: setting.js → isipulsa.username / token / appVersionCode
+ * Katalog  : botwa/database/pulsa_catalog.json
+ * User auth: botwa/database/pulsa_users.json
+ * Kredensial default: setting.js → isipulsa.username / token / appVersionCode
  */
 
 const https   = require('https');
@@ -25,23 +29,20 @@ const fs      = require('fs');
 const path    = require('path');
 const setting = require('../setting.js');
 
-const BASE     = 'isipulsa.web.id';
-const cfg      = setting.isipulsa || {};
-const USERNAME = cfg.username        || '';
-const TOKEN    = cfg.token           || '';
-const VER      = cfg.appVersionCode  || '250608';
+const BASE = 'isipulsa.web.id';
+const cfg  = setting.isipulsa || {};
+const VER  = cfg.appVersionCode || '250608';
 
-const CATALOG_PATH   = path.join(__dirname, '../database/pulsa_catalog.json');
-const VALIDATOR_TTL  = 3_600_000; // 1 jam
+const CATALOG_PATH = path.join(__dirname, '../database/pulsa_catalog.json');
+const USERS_PATH   = path.join(__dirname, '../database/pulsa_users.json');
+const VALIDATOR_TTL = 3_600_000; // 1 jam
 
 let _validators = null;
 let _validatorTs = 0;
 
 // ─── Catalog IO ────────────────────────────────────────────
 function loadCatalog() {
-  try {
-    if (fs.existsSync(CATALOG_PATH)) return JSON.parse(fs.readFileSync(CATALOG_PATH, 'utf8'));
-  } catch {}
+  try { if (fs.existsSync(CATALOG_PATH)) return JSON.parse(fs.readFileSync(CATALOG_PATH, 'utf8')); } catch {}
   return {};
 }
 function saveCatalog(data) {
@@ -49,11 +50,36 @@ function saveCatalog(data) {
   fs.writeFileSync(CATALOG_PATH, JSON.stringify(data, null, 2));
 }
 
+// ─── User Token IO ─────────────────────────────────────────
+function loadUsers() {
+  try { if (fs.existsSync(USERS_PATH)) return JSON.parse(fs.readFileSync(USERS_PATH, 'utf8')); } catch {}
+  return {};
+}
+function saveUsers(data) {
+  fs.mkdirSync(path.dirname(USERS_PATH), { recursive: true });
+  fs.writeFileSync(USERS_PATH, JSON.stringify(data, null, 2));
+}
+
+// Ambil auth {username, token} untuk sender — user-specific dulu, fallback ke setting.js
+function getAuth(sender) {
+  const users = loadUsers();
+  const jidKey = sender.split('@')[0].split(':')[0];
+  for (const [k, v] of Object.entries(users)) {
+    if (k === jidKey || k === sender) return { username: v.username, token: v.token };
+  }
+  return { username: cfg.username || '', token: cfg.token || '' };
+}
+
 // ─── API Helper ────────────────────────────────────────────
-function apiCall(apiPath, params) {
+function apiCall(apiPath, params, auth) {
   return new Promise((resolve, reject) => {
-    const body = qs.stringify({ app_version_code: VER, auth_username: USERNAME, auth_token: TOKEN, ...params });
-    const req  = https.request({
+    const { username, token } = auth || {};
+    const body = qs.stringify({
+      app_version_code: VER, app_version_name: '25.06.08',
+      ...(username ? { auth_username: username, auth_token: token } : {}),
+      ...params,
+    });
+    const req = https.request({
       hostname: BASE, path: apiPath, method: 'POST',
       headers: {
         'content-type'   : 'application/x-www-form-urlencoded',
@@ -77,8 +103,22 @@ function apiCall(apiPath, params) {
     req.end();
   });
 }
-const apiGet   = p => apiCall('/api/v2/get',   { vss: 1, ...p });
-const apiOrder = p => apiCall('/api/v2/order', p);
+
+// Login ke isipulsa → kembalikan { success, username, token, message }
+async function doLogin(username, password) {
+  const res = await apiCall('/api/v2/login', { username, password });
+  if (!res.success) return { success: false, message: res.message || 'Login gagal' };
+  // Coba berbagai field nama token dari response
+  const token = res.auth_token || res.token || res.access_token
+    || (res.user && (res.user.auth_token || res.user.token))
+    || (res.data && (res.data.auth_token || res.data.token))
+    || null;
+  if (!token) return { success: false, message: 'Login berhasil tapi token tidak ditemukan.\nResponse: ' + JSON.stringify(res).slice(0, 200) };
+  return { success: true, username: res.username || username, token };
+}
+
+const apiGet   = (p, auth) => apiCall('/api/v2/get',   { vss: 1, ...p }, auth);
+const apiOrder = (p, auth) => apiCall('/api/v2/order', p, auth);
 
 // ─── Operator detect ───────────────────────────────────────
 async function getValidators() {
@@ -118,7 +158,7 @@ function guessOp(nama) {
 // ═══════════════════════════════════════════════════════════
 module.exports = {
   name: 'pulsa',
-  command: ['.saldo', '.trx', '.addpaket', '.importpaket', '.delpaket', '.editpaket', '.listpaket', '.cekop', '.beli'],
+  command: ['.saldo', '.saldoku', '.trx', '.addpaket', '.importpaket', '.delpaket', '.editpaket', '.listpaket', '.cekop', '.beli', '.loginpulsa', '.logoutpulsa'],
 
   // ─── handleSession: dipanggil main.js saat ada global.userState[sender]
   //     Signature wajib: (conn, sender, text, msg)
@@ -128,6 +168,49 @@ module.exports = {
 
     const reply = txt => conn.sendMessage(sender, { text: txt }, { quoted: msg });
     const step  = session.step;
+
+    // ── LOGIN PULSA STEP-BY-STEP ───────────────────────────
+    if (step === 'loginpulsa_user') {
+      const t = text.trim();
+      if (['batal', 'cancel'].includes(t.toLowerCase())) {
+        delete global.userState[sender];
+        return reply('❎ Login dibatalkan.');
+      }
+      if (!t) return reply('⚠️ Username tidak boleh kosong. Coba lagi:');
+      session.lpUser = t;
+      session.step   = 'loginpulsa_pass';
+      return reply(`👤 Username: *${t}*\n\n🔐 Sekarang masukkan *password* akun isipulsa:\n_Pesan ini akan dihapus dari memori setelah login_`);
+    }
+
+    if (step === 'loginpulsa_pass') {
+      const t = text.trim();
+      if (['batal', 'cancel'].includes(t.toLowerCase())) {
+        delete global.userState[sender];
+        return reply('❎ Login dibatalkan.');
+      }
+      if (!t) return reply('⚠️ Password tidak boleh kosong. Coba lagi:');
+
+      delete global.userState[sender];
+      await reply('⏳ Mencoba login ke isipulsa...');
+      try {
+        const result = await doLogin(session.lpUser, t);
+        if (!result.success) return reply(`❌ *Login Gagal*\n${result.message}`);
+
+        const users  = loadUsers();
+        const jidKey = sender.split('@')[0].split(':')[0];
+        users[jidKey] = { username: result.username, token: result.token, loginAt: new Date().toISOString() };
+        saveUsers(users);
+        return reply(
+          `✅ *Login Berhasil!*\n\n` +
+          `👤 Username: *${result.username}*\n` +
+          `🔑 Token tersimpan\n\n` +
+          `Sekarang kamu bisa:\n` +
+          `• *.saldoku* — cek saldo akun kamu\n` +
+          `• *.beli <nomor> <kode>* — beli paket pakai saldo kamu\n` +
+          `• *.listpaket* — lihat daftar paket`
+        );
+      } catch (e) { return reply(`❌ Error: ${e.message}`); }
+    }
 
     // ── KONFIRMASI BELI ────────────────────────────────────
     if (step === 'beli_konfirm') {
@@ -143,7 +226,7 @@ module.exports = {
       delete global.userState[sender];
       await reply('⏳ Memproses transaksi...');
       try {
-        const res = await apiOrder({ voucher_id: session.voucherId, phone: session.nomor, payment: 'balance' });
+        const res = await apiOrder({ voucher_id: session.voucherId, phone: session.nomor, payment: 'balance' }, session.auth);
         const catalog = loadCatalog();
         const paket   = catalog[session.kode] || {};
         if (res.status) {
@@ -291,20 +374,59 @@ module.exports = {
     const reply  = txt => conn.sendMessage(sender, { text: txt }, { quoted: msg });
     const cmd    = (msg.message?.conversation || msg.message?.extendedTextMessage?.text || '')
                     .trim().split(/\s+/)[0].toLowerCase();
-    const owner  = isOwner(sender);
+    const owner = isOwner(sender);
+    const auth  = getAuth(sender);
+    const hasAuth = !!(auth.username && auth.token);
 
-    if (!USERNAME || !TOKEN) {
-      return reply('⚠️ Kredensial isipulsa belum diisi di setting.js\n(isipulsa.username & isipulsa.token)');
+    // ── .loginpulsa ──────────────────────────────────────────
+    if (cmd === '.loginpulsa') {
+      global.userState[sender] = { status: 'pulsa', step: 'loginpulsa_user' };
+      return reply(
+        `🔐 *Login Akun isipulsa*\n\n` +
+        `Masukkan *username* akun isipulsa kamu:\n` +
+        `_(username yang kamu pakai untuk login di app isipulsa)_\n\n` +
+        `_Ketik batal untuk membatalkan_`
+      );
     }
 
-    // ── .saldo ───────────────────────────────────────────────
+    // ── .logoutpulsa ─────────────────────────────────────────
+    if (cmd === '.logoutpulsa') {
+      const users  = loadUsers();
+      const jidKey = sender.split('@')[0].split(':')[0];
+      if (!users[jidKey]) return reply('⚠️ Kamu belum login. Gunakan *.loginpulsa* dulu.');
+      const uname = users[jidKey].username;
+      delete users[jidKey];
+      saveUsers(users);
+      return reply(`✅ Token akun *${uname}* berhasil dihapus.\nGunakan *.loginpulsa* untuk login ulang.`);
+    }
+
+    // ── .saldo (owner — lihat saldo akun bot) ────────────────
     if (cmd === '.saldo') {
-      if (!owner) return reply('⛔ Perintah ini khusus owner.');
+      if (!owner) return reply('⛔ Perintah ini khusus owner. Gunakan *.saldoku* untuk saldo akun kamu.');
+      const ownerAuth = { username: cfg.username || '', token: cfg.token || '' };
+      if (!ownerAuth.username || !ownerAuth.token) return reply('⚠️ Kredensial isipulsa belum diisi di setting.js');
       try {
-        const res = await apiGet({ 'requests[0]': 'balance' });
+        const res = await apiGet({ 'requests[0]': 'balance' }, ownerAuth);
         if (!res.success) return reply(`❌ ${res.message || 'Gagal ambil saldo'}`);
         const b = res.balance?.results;
-        return reply(`💰 *Saldo isipulsa*\n\n👤 ${USERNAME}\n💵 *${b?.balance_str || rp(b?.balance || 0)}*`);
+        return reply(`💰 *Saldo isipulsa (Bot)*\n\n👤 ${ownerAuth.username}\n💵 *${b?.balance_str || rp(b?.balance || 0)}*`);
+      } catch (e) { return reply(`❌ ${e.message}`); }
+    }
+
+    // ── .saldoku (semua user — lihat saldo akun sendiri) ─────
+    if (cmd === '.saldoku') {
+      if (!hasAuth) {
+        return reply(
+          `⚠️ Kamu belum login ke isipulsa.\n\n` +
+          `Gunakan *.loginpulsa* untuk daftarkan akun isipulsa kamu,\n` +
+          `atau hubungi owner untuk membeli paket.`
+        );
+      }
+      try {
+        const res = await apiGet({ 'requests[0]': 'balance' }, auth);
+        if (!res.success) return reply(`❌ ${res.message || 'Gagal ambil saldo'}`);
+        const b = res.balance?.results;
+        return reply(`💰 *Saldo isipulsa Kamu*\n\n👤 ${auth.username}\n💵 *${b?.balance_str || rp(b?.balance || 0)}*`);
       } catch (e) { return reply(`❌ ${e.message}`); }
     }
 
@@ -312,8 +434,9 @@ module.exports = {
     if (cmd === '.trx') {
       if (!owner) return reply('⛔ Perintah ini khusus owner.');
       const limit = Math.min(parseInt(args[0]) || 5, 20);
+      const ownerAuth = { username: cfg.username || '', token: cfg.token || '' };
       try {
-        const res = await apiGet({ 'requests[1]': 'transactions', 'requests[1][limit]': String(limit) });
+        const res = await apiGet({ 'requests[1]': 'transactions', 'requests[1][limit]': String(limit) }, ownerAuth);
         if (!res.success) return reply(`❌ ${res.message || 'Gagal'}`);
         const { total, results } = res.transactions?.results || {};
         if (!results?.length) return reply('📭 Belum ada transaksi.');
@@ -471,6 +594,7 @@ module.exports = {
         nomor,
         kode,
         voucherId: paket.voucherId,
+        auth,
       };
 
       return reply(
