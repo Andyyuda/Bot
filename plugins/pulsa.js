@@ -374,8 +374,8 @@ module.exports = {
                         .trim().split(/\s+/)[0].toLowerCase();
     // sender = remoteJid (bisa group). Gunakan participant untuk cek owner & auth
     const senderJid  = msg.key?.participant || sender;
-    const owner      = isOwner(senderJid);
-    const auth       = getAuth(senderJid);
+    const owner   = isOwner(senderJid);
+    const auth    = getAuth(senderJid);
     const hasAuth = !!(auth.username && auth.token);
 
     // ── .loginpulsa ──────────────────────────────────────────
