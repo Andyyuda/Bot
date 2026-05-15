@@ -177,7 +177,13 @@ async function start() {
   }
 
   if (!isAlreadyLoggedIn) {
-    if (tg.isConfigured) {
+
+  // PRIORITAS DASHBOARD
+  if (modeLogin) {
+
+    console.log(chalk.green('🌐 Login dari dashboard'));
+
+  } else if (tg.isConfigured) {
       console.log(chalk.cyan('📲 Bot belum terdaftar. Mengirim pilihan login ke Telegram...'));
       await tg.sendMessage(
         '🤖 <b>BotWA siap login!</b>\n\n' +
