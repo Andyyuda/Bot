@@ -671,12 +671,10 @@ app.post('/api/login/qr', async (req, res) => {
       });
     }
 
-    // logout session lama
     try {
       await global.sock.logout();
     } catch {}
 
-    // hapus auth
     fs.rmSync('./auth', {
       recursive: true,
       force: true
@@ -684,13 +682,8 @@ app.post('/api/login/qr', async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Restart bot untuk generate QR'
+      message: 'Auth dihapus, restart manual bot'
     });
-
-    // restart otomatis
-    setTimeout(() => {
-      process.exit(0);
-    }, 1000);
 
   } catch (e) {
 
