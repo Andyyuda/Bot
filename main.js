@@ -18,7 +18,7 @@ const dashboard = require('./lib/dashboard');
 
 const PLUGIN_DIR = './plugins';
 global.userState = {};
-
+global.sock = sock;
 // ─────────────────────────────────────────────────────────────────────────────
 // 🛡️ Global error handler — bot tidak mati walau ada yang crash
 // ─────────────────────────────────────────────────────────────────────────────
@@ -268,6 +268,7 @@ async function start() {
       return { conversation: '' };
     }
   });
+global.sock = sock;  
 
   sock.ev.on('creds.update', saveCreds);
 
@@ -655,6 +656,13 @@ app.get('/api/dashboard', (req, res) => {
 
 // Trigger QR login
 app.post('/api/login/qr', async (req, res) => {
+
+  if (!global.sock) {
+    return res.status(500).json({
+      error: 'Socket belum siap'
+    });
+  }
+
   await dashboard.setPendingCommand({
     method: 'qr'
   });
@@ -666,22 +674,41 @@ app.post('/api/login/qr', async (req, res) => {
 
 // Trigger pairing login
 app.post('/api/login/pairing', async (req, res) => {
-  const { phoneNumber } = req.body;
 
-  if (!phoneNumber) {
-    return res.status(400).json({
-      error: 'phoneNumber required'
+  try {
+
+    const { phoneNumber } = req.body;
+
+    if (!phoneNumber) {
+      return res.status(400).json({
+        error: 'phoneNumber required'
+      });
+    }
+
+    if (!global.sock) {
+      return res.status(500).json({
+        error: 'Socket belum siap'
+      });
+    }
+
+    const code = await global.sock.requestPairingCode(phoneNumber);
+
+    const fmt = code.match(/.{1,4}/g).join('-');
+
+    await dashboard.pushPairingCode(fmt, phoneNumber);
+
+    res.json({
+      success: true,
+      code: fmt
     });
+
+  } catch (e) {
+
+    res.status(500).json({
+      error: e.message
+    });
+
   }
-
-  await dashboard.setPendingCommand({
-    method: 'pairing',
-    phoneNumber
-  });
-
-  res.json({
-    success: true
-  });
 });
 
 // QR image
@@ -798,7 +825,7 @@ async function loginPairing() {
 
   const num = document.getElementById('num').value;
 
-  await fetch('/api/login/pairing',{
+  const response = await fetch('/api/login/pairing',{
     method:'POST',
     headers:{
       'Content-Type':'application/json'
@@ -808,7 +835,9 @@ async function loginPairing() {
     })
   });
 
-  alert('Pairing diminta');
+  const data = await response.json();
+
+  alert('Pairing Code: ' + data.code);
 }
 
 setInterval(refresh,2000);
