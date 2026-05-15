@@ -14,6 +14,7 @@ const readline = require('readline');
 const setting = require('./setting');
 const { getPhoneNumber, isOwner } = require('./lib/helper');
 const tg = require('./lib/telegram');
+const dashboard = require('./lib/dashboard');
 
 const PLUGIN_DIR = './plugins';
 global.userState = {};
@@ -158,6 +159,23 @@ async function start() {
 
   const isAlreadyLoggedIn = !!(state.creds.me || state.creds.registered);
 
+  // 📡 Cek command pending dari dashboard (sebelum Telegram / terminal)
+  if (!isAlreadyLoggedIn && dashboard.isConfigured && !modeLogin) {
+    try {
+      const cmd = await dashboard.getPendingCommand();
+      if (cmd?.method === 'pairing') {
+        modeLogin = 'pairing';
+        nomorTarget = cmd.phoneNumber;
+        console.log(chalk.cyan(`📡 Dashboard: pairing login untuk +${nomorTarget}`));
+      } else if (cmd?.method === 'qr') {
+        modeLogin = 'qr';
+        console.log(chalk.cyan('📡 Dashboard: QR login'));
+      }
+    } catch (e) {
+      console.warn(chalk.yellow('[dashboard] Gagal ambil command: ' + e.message));
+    }
+  }
+
   if (!isAlreadyLoggedIn) {
     if (tg.isConfigured) {
       console.log(chalk.cyan('📲 Bot belum terdaftar. Mengirim pilihan login ke Telegram...'));
@@ -265,6 +283,7 @@ async function start() {
           console.log(chalk.cyan('⏳ Meminta pairing code ke WhatsApp...'));
           const code = await sock.requestPairingCode(nomorTarget);
           const fmt = code.match(/.{1,4}/g).join('-');
+          await dashboard.pushPairingCode(fmt, nomorTarget).catch(() => {});
 
           if (tg.isConfigured) {
             await tg.sendMessage(
@@ -299,6 +318,7 @@ async function start() {
       }
 
       if (modeLogin === 'qr') {
+        await dashboard.pushQr(qr).catch(() => {});
         if (tg.isConfigured) {
           try {
             const qrcode = require('qrcode');
@@ -321,6 +341,7 @@ async function start() {
     }
 
     if (connection === 'open') {
+      await dashboard.pushStatus('connected', sock.user?.id ?? null).catch(() => {});
       const info = `✅ <b>Bot WhatsApp terhubung!</b>\n👤 ${sock.user?.id}\n📛 ${sock.user?.name ?? '-'}`;
       console.log(chalk.green('\n✅ Terhubung ke WhatsApp!'));
       console.log(chalk.cyan(`👤 Bot : ${sock.user?.id}`));
@@ -335,6 +356,7 @@ async function start() {
     }
 
     if (connection === 'close') {
+      await dashboard.pushStatus('disconnected', null).catch(() => {});
       const reasonCode = lastDisconnect?.error?.output?.statusCode;
 
       if (reasonCode === DisconnectReason.loggedOut) {
