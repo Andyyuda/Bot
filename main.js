@@ -657,19 +657,42 @@ app.get('/api/dashboard', (req, res) => {
 // Trigger QR login
 app.post('/api/login/qr', async (req, res) => {
 
-  if (!global.sock) {
-    return res.status(500).json({
-      error: 'Socket belum siap'
+  try {
+
+    if (!global.sock) {
+      return res.status(500).json({
+        error: 'Socket belum siap'
+      });
+    }
+
+    // logout session lama
+    try {
+      await global.sock.logout();
+    } catch {}
+
+    // hapus auth
+    fs.rmSync('./auth', {
+      recursive: true,
+      force: true
     });
+
+    res.json({
+      success: true,
+      message: 'Restart bot untuk generate QR'
+    });
+
+    // restart otomatis
+    setTimeout(() => {
+      process.exit(0);
+    }, 1000);
+
+  } catch (e) {
+
+    res.status(500).json({
+      error: e.message
+    });
+
   }
-
-  await dashboard.setPendingCommand({
-    method: 'qr'
-  });
-
-  res.json({
-    success: true
-  });
 });
 
 // Trigger pairing login
@@ -691,15 +714,25 @@ app.post('/api/login/pairing', async (req, res) => {
       });
     }
 
-    const code = await global.sock.requestPairingCode(phoneNumber);
+    // logout dulu
+    try {
+      await global.sock.logout();
+    } catch {}
 
-    const fmt = code.match(/.{1,4}/g).join('-');
+    // hapus auth
+    fs.rmSync('./auth', {
+      recursive: true,
+      force: true
+    });
 
-    await dashboard.pushPairingCode(fmt, phoneNumber);
+    // restart
+    setTimeout(() => {
+      process.exit(0);
+    }, 1000);
 
     res.json({
       success: true,
-      code: fmt
+      message: 'Bot restarting, tunggu 10 detik lalu pairing lagi'
     });
 
   } catch (e) {
