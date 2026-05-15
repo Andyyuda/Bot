@@ -18,7 +18,6 @@ const dashboard = require('./lib/dashboard');
 
 const PLUGIN_DIR = './plugins';
 global.userState = {};
-global.sock = sock;
 // ─────────────────────────────────────────────────────────────────────────────
 // 🛡️ Global error handler — bot tidak mati walau ada yang crash
 // ─────────────────────────────────────────────────────────────────────────────
